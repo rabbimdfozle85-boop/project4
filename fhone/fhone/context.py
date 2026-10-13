@@ -62,12 +62,30 @@ def build(store, sid: str, cfg: dict, extra_system: list | None = None) -> list:
     while total > budget and start < len(rows) - 1:
         total -= row_tokens(rows[start])
         start += 1
-    # Never begin on a tool result whose assistant call was dropped: the API
-    # rejects an orphaned tool message.
+    # Never begin on a tool result whose assistant call was dropped:
+    # the API rejects an orphaned tool message.
     while start < len(rows) - 1 and rows[start]["role"] == "tool":
         start += 1
 
-    out.extend(to_api(r) for r in rows[start:])
+    selected = rows[start:]
+
+    # Never split an assistant tool_calls from its tool results: the API
+    # rejects a tool message with no matching preceding tool_calls.
+    tool_call_ids = set()
+    for msg in selected:
+        if msg["role"] == "assistant" and msg["tool_calls"]:
+            try:
+                for c in json.loads(msg["tool_calls"]):
+                    if c.get("id"):
+                        tool_call_ids.add(c["id"])
+            except (ValueError, TypeError):
+                pass
+    if tool_call_ids:
+        selected = [r for r in selected
+                    if r["role"] != "tool"
+                    or r["tool_call_id"] in tool_call_ids]
+
+    out.extend(to_api(r) for r in selected)
     return out
 
 

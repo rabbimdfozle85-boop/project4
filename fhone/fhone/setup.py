@@ -165,7 +165,7 @@ def _setup_provider(cfg: dict) -> None:
 
         if pid == "pollinations":
             # Keyless
-            print("  Pollunations is keyless — no API key needed.")
+            print("  Pollinations is keyless — no API key needed.")
             cfg["portal_enabled"] = cfg.get("portal_enabled", True)
             store = Store(cfg["db"])
             pool = providers_mod.ProviderPool(store, cfg)

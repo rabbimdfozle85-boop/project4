@@ -58,7 +58,8 @@ def run_subagent(cfg: dict, goal: str, context: str = "", timeout: int = 300) ->
     env = dict(os.environ)
     env["FHONE_HOME"] = cfg["home"]
     env["FHONE_SUBAGENT"] = "1"
-    env.pop("FHONE_API_KEY", None) if not cfg.get("api_key") else None
+    # Subagents don't need the parent's API key in env — they use config
+    env.pop("FHONE_API_KEY", None)
 
     lock = _lockdir(cfg) / ("%d-%d.lock" % (os.getpid(), int(time.time() * 1000)))
     try:

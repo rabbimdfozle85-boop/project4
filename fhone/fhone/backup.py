@@ -150,6 +150,7 @@ def restore(cfg: dict, store, path: str) -> str:
             return "error: corrupt_backup: PRAGMA integrity_check failed; nothing replaced"
 
         store.close()
+        # Replace the database file while the store is closed
         shutil.copy2(db_src, config_mod.db_path())
         for rel, dest in (("config.json", config_mod.config_path()),
                           ("auth.json", config_mod.auth_path())):

@@ -58,11 +58,18 @@ def index(cfg: dict) -> list:
     return out
 
 
+_index_cache: dict = {}
+_index_cache_key: str = ""
+
+
 def _find(cfg: dict, name: str):
-    for entry in index(cfg):
-        if entry["name"] == name:
-            return entry
-    return None
+    """Find a skill by name. Caches the index to avoid repeated dir scans."""
+    global _index_cache, _index_cache_key
+    key = cfg.get("skills_dir", "")
+    if key != _index_cache_key:
+        _index_cache = {e["name"]: e for e in index(cfg)}
+        _index_cache_key = key
+    return _index_cache.get(name)
 
 
 def list_skills(cfg: dict, tier: int = 0, query: str = "") -> str:
@@ -105,6 +112,7 @@ def view_skill(cfg: dict, name: str) -> str:
 
 def manage_skill(cfg: dict, action: str, name: str, content: str = "",
                  description: str = "", tier: int = 0) -> str:
+    global _index_cache, _index_cache_key
     root = Path(cfg["skills_dir"])
     root.mkdir(parents=True, exist_ok=True)
     target_dir = root / _slug(name)
@@ -123,6 +131,8 @@ def manage_skill(cfg: dict, action: str, name: str, content: str = "",
             return "error: bad_frontmatter: missing 'description'"
         target_dir.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+        _index_cache.clear()
+        _index_cache_key = ""
         return "created %s" % target
 
     entry = _find(cfg, name)
@@ -136,6 +146,8 @@ def manage_skill(cfg: dict, action: str, name: str, content: str = "",
         if not meta.get("name"):
             return "error: bad_frontmatter: missing 'name'"
         entry["path"].write_text(content, encoding="utf-8")
+        _index_cache.clear()
+        _index_cache_key = ""
         return "edited %s" % entry["path"]
 
     if action == "delete":
@@ -146,6 +158,8 @@ def manage_skill(cfg: dict, action: str, name: str, content: str = "",
                 parent.rmdir()
         except OSError as e:
             return "error: delete_failed: %s" % e
+        _index_cache.clear()
+        _index_cache_key = ""
         return "deleted %s" % name
 
     if action == "set_tier":
@@ -160,6 +174,8 @@ def manage_skill(cfg: dict, action: str, name: str, content: str = "",
                 lambda m: "---\n%s\ntier: %d\n---\n" % (m.group(1).rstrip(), int(tier)),
                 text, count=1)
         entry["path"].write_text(text, encoding="utf-8")
+        _index_cache.clear()
+        _index_cache_key = ""
         return "tier of %s set to %d" % (name, int(tier))
 
     return "error: bad_argument: unknown action %s" % action

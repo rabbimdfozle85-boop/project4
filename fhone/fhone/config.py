@@ -80,17 +80,9 @@ DEFAULTS: dict = {
     "reasoning": "",
     "fast": False,
     "approvals": "ask",
-    # --- display ------------------------------------------------------------
     "display_skin": "default",
     "display_tool_emojis": True,
     "display_compact": False,
-    "status_bar": True,
-    "timestamps": False,
-    "verbose": False,
-    "focus": False,
-    "reasoning": "",
-    "fast": False,
-    "approvals": "ask",
     # --- security -----------------------------------------------------------
     "security_dangerous_approval": True,
     # --- misc ---------------------------------------------------------------

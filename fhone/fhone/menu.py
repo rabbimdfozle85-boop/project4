@@ -110,33 +110,33 @@ def show_menu(title: str, options: list[tuple], cancel: bool = True) -> int:
     Options: list of (key, label, description_or_None)
     Returns: the index of the selected option, or -1 for cancel.
     """
-    print()
-    print(h1(title))
-    print(sep())
-    for i, (key, label, desc) in enumerate(options, 1):
-        d = c(" — %s" % desc, DIM) if desc else ""
-        print("    %s) %s%s" % (c(str(i), CYAN), label, d))
-    if cancel:
-        print("    0) %s" % c("Cancel", YELLOW))
-    print(sep())
-    
-    try:
-        val = input("  %s: " % c("Select", BOLD)).strip()
-    except (EOFError, KeyboardInterrupt):
+    while True:
         print()
-        return -1
-    
-    if val == "0" and cancel:
-        return -1
-    try:
-        idx = int(val) - 1
-        if 0 <= idx < len(options):
-            return idx
-    except (ValueError, TypeError):
-        pass
-    
-    print(warning("Invalid choice. Try again."))
-    return show_menu(title, options, cancel)
+        print(h1(title))
+        print(sep())
+        for i, (key, label, desc) in enumerate(options, 1):
+            d = c(" — %s" % desc, DIM) if desc else ""
+            print("    %s) %s%s" % (c(str(i), CYAN), label, d))
+        if cancel:
+            print("    0) %s" % c("Cancel", YELLOW))
+        print(sep())
+        
+        try:
+            val = input("  %s: " % c("Select", BOLD)).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return -1
+        
+        if val == "0" and cancel:
+            return -1
+        try:
+            idx = int(val) - 1
+            if 0 <= idx < len(options):
+                return idx
+        except (ValueError, TypeError):
+            pass
+        
+        print(warning("Invalid choice. Try again."))
 
 
 def search_filter(items: list[str], query: str) -> list[str]:

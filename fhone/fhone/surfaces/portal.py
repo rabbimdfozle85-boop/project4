@@ -166,7 +166,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 answer = self.ctx.agent.turn(sid, message)
             except Exception as e:
-                return self._json(500, {"error": "%s: %s" % (type(e).__name__, e)})
+                self.ctx.log("portal: agent error: %s: %s" % (type(e).__name__, e))
+                return self._json(500, {"error": "internal error — check logs"})
             return self._json(200, {"session": sid, "answer": answer})
 
         if path == "/api/memory":
