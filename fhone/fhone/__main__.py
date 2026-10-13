@@ -586,7 +586,7 @@ def main(argv=None) -> int:
                     choices=["chat", "install", "setup", "backup", "restore", "provider",
                              "status", "skills", "doctor", "version",
                              "start", "stop", "restart", "service", "boot",
-                             "portal", "telegram", "config", "_supervise"])
+                             "portal", "telegram", "config", "auth", "_supervise"])
     ap.add_argument("-q", "--query", help="one-shot query, print the answer and exit")
     ap.add_argument("--session", help="session id to use or resume")
     ap.add_argument("--model", help="override the configured model")
@@ -606,7 +606,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-path", action="store_true", help="install: skip the command binding")
     ap.add_argument("--foreground", action="store_true",
                     help="start: run in the foreground instead of detaching")
-    ap.add_argument("action", nargs="?", help="sub-action (provider/skills/portal/telegram/service/config)")
+    ap.add_argument("action", nargs="?", help="sub-action (provider/skills/portal/telegram/service/config/auth)")
+    ap.add_argument("name2", nargs="?", default=None, help="second positional (user-id, model, etc.)")
     ap.add_argument("name", nargs="?", default=None, help="provider/skill/config name")
     ap.add_argument("url", nargs="?", default=None, help="provider base url or config value")
     ap.add_argument("extra", nargs="?", default=None, help="extra value (models list, etc.)")
@@ -653,11 +654,48 @@ def main(argv=None) -> int:
         return cmd_telegram(cfg, args)
     if args.command == "config":
         return cmd_config(cfg, args)
+    if args.command == "auth":
+        action = (args.action or "status").lower()
+        if action == "nous-key":
+            key = args.name or args.name2 or (args.url or "")
+            if not key:
+                print("usage: fhone auth nous-key <api-key>")
+                return 2
+            from . import auth_nous
+            auth_nous.set_api_key(cfg, key)
+            print("Nous API key saved. Set a model to use it:")
+            print("  fhone config set model nousresearch/hermes-4-405b")
+            return 0
+        if action == "status":
+            from . import auth_nous, config as config_mod
+            auth = config_mod.load_auth()
+            if auth.get("auth_method") == "api_key":
+                print("  Nous: API key (set)")
+            elif auth.get("anon_token"):
+                print("  Nous: guest (expires in %s days)" % auth.get("idle_ttl_days", "?"))
+            else:
+                print("  Nous: not signed in")
+                print("  Run: fhone auth nous-key <api-key>")
+            return 0
+        print("usage: fhone auth status | nous-key <api-key>")
+        return 2
     if args.command == "chat":
         if args.model:
             cfg["model"] = args.model
         cfg["_yolo"] = bool(getattr(args, "yolo", False))
         args.session = getattr(args, "session", "cli-default")
+        # Force setup if no provider or model is configured
+        from .store import Store
+        store = Store(cfg["db"])
+        providers = store.providers(enabled_only=False)
+        store.close()
+        if not providers or not cfg.get("model"):
+            print()
+            print("  No provider or model configured.")
+            print("  Starting setup wizard...")
+            print()
+            from . import setup as setup_mod
+            setup_mod.run(cfg)
         return cmd_chat(cfg, args)
     return cmd_chat(cfg, args)
 

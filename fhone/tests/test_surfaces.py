@@ -115,8 +115,9 @@ def main() -> int:
     check("status reports a version", bool(payload.get("version")))
     check("status lists 45 tools", len(payload.get("tools") or []) == 45,
           len(payload.get("tools") or []))
-    check("status reports the fake provider",
-          any(p["id"] == "fake" for p in payload.get("providers") or []))
+    check("status reports no providers on a clean install",
+          len(payload.get("providers") or []) == 0,
+          len(payload.get("providers") or []))
 
     code, body = get("/")
     check("dashboard serves HTML", code == 200 and "<!doctype html>" in body.lower())

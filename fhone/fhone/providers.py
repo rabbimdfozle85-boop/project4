@@ -43,10 +43,12 @@ class ProviderPool:
 
     # -- setup -------------------------------------------------------------
     def seed_defaults(self) -> None:
-        for pid, label, base, style, model, prio in DEFAULT_PROVIDERS:
-            if self.store.provider_get(pid) is None:
-                self.store.provider_add(pid, base, label=label, api_style=style,
-                                        default_model=model, priority=prio)
+        """Intentionally does nothing. No providers are pre-loaded.
+
+        The user must configure their own providers during setup.
+        This is a deliberate design choice: the platform starts clean.
+        """
+        return None
 
     def add_provider(self, pid: str, base_url: str, *, label: str = "",
                      api_style: str = "openai", model: str = "",
