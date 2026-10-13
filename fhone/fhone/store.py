@@ -227,6 +227,11 @@ class Store:
     @property
     def con(self):
         con = getattr(self._local, "con", None)
+        if con is not None:
+            try:
+                con.execute("SELECT 1").fetchone()
+            except sqlite3.Error:
+                con = None
         if con is None:
             con = self._new_connection()
             self._local.con = con
@@ -258,12 +263,21 @@ class Store:
         for target, statements in MIGRATIONS:
             if target <= version:
                 continue
-            for sql in statements:
+            try:
+                self.con.execute("BEGIN IMMEDIATE")
+                for sql in statements:
+                    try:
+                        self.con.execute(sql)
+                    except sqlite3.Error:
+                        pass  # column already present: idempotent
+                self.set_meta("schema_version", str(target))
+                self.con.execute("COMMIT")
+            except sqlite3.Error:
                 try:
-                    self.con.execute(sql)
+                    self.con.execute("ROLLBACK")
                 except sqlite3.Error:
-                    pass          # column already present: idempotent
-            self.set_meta("schema_version", str(target))
+                    pass
+                raise
             version = target
 
     def integrity_check(self) -> bool:
