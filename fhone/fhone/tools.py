@@ -620,8 +620,10 @@ class Tools:
         h = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
         h.update(headers or {})
         req = urllib.request.Request(url, headers=h)
+        cap = int(self.cfg["tool_output_cap"])
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read(int(self.cfg["tool_output_cap"]) * 4)
+            # Read only up to cap + small margin, not 4x cap
+            raw = resp.read(cap + 1024)
             if (resp.headers.get("Content-Encoding") or "").lower() == "gzip":
                 import gzip
                 raw = gzip.decompress(raw)

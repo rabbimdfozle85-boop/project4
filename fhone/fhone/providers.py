@@ -71,6 +71,9 @@ class ProviderPool:
                                 api_style=row["api_style"],
                                 default_model=row.get("default_model") or "",
                                 priority=row["priority"], models=models)
+        # Clear stale 404 cache for this provider — it may now serve the model
+        self._no_model = {pair for pair in self._no_model
+                          if pair[0] != pid}
 
     def add_key(self, provider_id: str, key: str, label: str = "") -> int:
         return self.store.key_add(provider_id, key, label)
@@ -137,7 +140,13 @@ class ProviderPool:
         attempts = []
         tried = 0
         candidates = list(self.candidates())
-        serving = [c for c in candidates if self._supports(c[0], model)] or candidates
+        serving = [c for c in candidates if self._supports(c[0], model)]
+        if not serving:
+            # No provider declares support for this model. Only fall back to
+            # providers that serve 'any model' (empty models list), never to
+            # providers with an explicit allow-list that excludes it.
+            serving = [c for c in candidates
+                       if not (c[0].get("models") or [])]
         for prow, krow in serving:
             tried += 1
             key = krow["key"] if krow else ""

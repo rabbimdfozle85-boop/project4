@@ -170,6 +170,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(500, {"error": "internal error — check logs"})
             return self._json(200, {"session": sid, "answer": answer})
 
+        if path == "/api/chat/history":
+            session = str(body.get("session") or "default")
+            sid = self.ctx.session_for(session)
+            limit = int(body.get("limit") or 20)
+            rows = self.ctx.store.window(sid, limit)
+            return self._json(200, {"session": sid, "messages": [dict(r) for r in rows]})
+
+        if path == "/api/chat/stream":
+            message = str(body.get("message") or "").strip()
+            if not message:
+                return self._json(400, {"error": "message required"})
+            session = str(body.get("session") or "default")
+            sid = self.ctx.session_for(session)
+            self.ctx.store.add(sid, "user", message)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            try:
+                self.ctx.agent.turn(sid, message, on_delta=self._sse_delta)
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except Exception as e:
+                self.ctx.log("portal: stream error: %s: %s" % (type(e).__name__, e))
+                self.wfile.write(("data: %s\n\n" % json.dumps({"error": str(e)})).encode())
+            return None
+
         if path == "/api/memory":
             content = str(body.get("content") or "").strip()
             if not content:
@@ -178,6 +205,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"id": mid})
 
         return self._json(404, {"error": "not_found", "path": path})
+
+    def _sse_delta(self, piece: str) -> None:
+        """Send a streaming delta to the portal client."""
+        try:
+            self.wfile.write(("data: %s\n\n" % json.dumps({"delta": piece})).encode())
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
 
 class Portal:
