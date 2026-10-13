@@ -219,7 +219,7 @@ Usage is recorded per key per day and shown in the status bar.
 
 ---
 
-## Tools (40)
+## Tools (45)
 
 `read_file` `write_file` `patch` `search_files` `list_dir` `terminal`
 `process_manage` `execute_code` `memory` `session_search` `todo_list`
@@ -227,7 +227,8 @@ Usage is recorded per key per day and shown in the status bar.
 `web_search` `web_extract` `http_get` `http_post` `vision_analyze` `image_generate`
 `text_to_speech` `clarify` `sysinfo` `file_move` `file_copy` `file_delete`
 `env_get` `env_set` `git` `curl` `json` `csv` `base64` `hash` `random`
-`datetime` `regex`
+`datetime` `regex` `kanban_show` `kanban_create` `kanban_complete`
+`kanban_block` `kanban_comment` `kanban_list`
 
 Every tool: returns a string, never raises into the turn loop, caps its output,
 validates its arguments, sandboxes its paths, and has a timeout.
@@ -294,7 +295,7 @@ replaced.
 | `llm.py` | the only inference network code: connection reuse, SSE, retry, gzip |
 | `providers.py` | registry, key pools, rotation, fallback, usage |
 | `context.py` | window + token budget + rolling summary with a watermark |
-| `tools.py` | the 30-tool registry |
+| `tools.py` | the 45-tool registry |
 | `agent.py` | the turn loop |
 | `skills.py` | index, on-demand loading, self-editing |
 | `delegate.py` | subagents, capped in the parent |

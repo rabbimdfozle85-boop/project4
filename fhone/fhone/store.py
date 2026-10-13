@@ -6,6 +6,9 @@ RAM spike on every save). Rows make each append O(1).
 
 Pragmas are tuned for a swap-pressured phone: a 1 MB page cache and temp
 b-trees held in memory rather than spilled to flash.
+
+Thread-aware: one connection per thread. WAL supports many connections in one
+process; busy_timeout serialises writers.
 """
 from __future__ import annotations
 
@@ -46,6 +49,7 @@ CREATE TABLE IF NOT EXISTS messages (
     interrupted  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_msg_session ON messages(session_id, id);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content);
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -78,6 +82,26 @@ CREATE TABLE IF NOT EXISTS agent_messages (
     created_at INTEGER NOT NULL,
     read_at    INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS kanban (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT NOT NULL,
+    description TEXT,
+    status      TEXT NOT NULL DEFAULT 'todo',
+    priority    INTEGER NOT NULL DEFAULT 0,
+    assignee    TEXT,
+    session_id  TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER
+);
+CREATE TABLE IF NOT EXISTS kanban_comments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kanban_id  INTEGER NOT NULL,
+    content    TEXT NOT NULL,
+    author     TEXT,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kanban_session ON kanban(session_id, status);
 
 CREATE TABLE IF NOT EXISTS providers (
     id            TEXT PRIMARY KEY,
@@ -140,8 +164,6 @@ PRAGMAS = (
     "foreign_keys=ON",
 )
 
-# Forward-only migrations. Each is a list of statements; a statement that fails
-# because the column already exists is tolerated, so a re-run is idempotent.
 MIGRATIONS = [
     (2, [
         "ALTER TABLE sessions ADD COLUMN summarized_upto INTEGER NOT NULL DEFAULT 0",
@@ -161,12 +183,11 @@ def today() -> str:
 
 
 def _last_id(cur) -> int:
-    """lastrowid is typed Optional; after an INSERT it is always set."""
     return int(cur.lastrowid or 0)
 
 
 def models_of(row) -> list:
-    """Parse a provider row's `models` JSON. An empty list means 'any model'."""
+    """Parse a provider row's `models` JSON. Empty list means 'any model'."""
     if row is None:
         return []
     try:
@@ -176,16 +197,7 @@ def models_of(row) -> list:
 
 
 class Store:
-    """Thread-aware SQLite access.
-
-    One connection PER THREAD. sqlite3 connections are thread-bound by default,
-    and one FHONE process serves several threads at once — portal request
-    handlers, the Telegram poller, the scheduler tick. WAL supports many
-    connections inside one process and `busy_timeout` serialises writers, so this
-    is both correct and cheap. (Sharing a single connection across threads raises
-    `ProgrammingError: SQLite objects created in a thread can only be used in
-    that same thread`.)
-    """
+    """Thread-aware SQLite access. One connection per thread."""
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -261,7 +273,7 @@ class Store:
         """Consistent snapshot. NEVER copy a live SQLite file by hand."""
         self.con.execute("VACUUM INTO ?", (dest,))
 
-    # -- meta --------------------------------------------------------------
+    # -- meta ---------------------------------------------------------------
     def get_meta(self, key: str):
         row = self.con.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
         return row["value"] if row else None
@@ -271,7 +283,7 @@ class Store:
             "INSERT INTO meta(key,value) VALUES(?,?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
-    # -- sessions ----------------------------------------------------------
+    # -- sessions -----------------------------------------------------------
     def ensure_session(self, sid: str, model: str = "", provider: str = "") -> None:
         ts = now()
         self.con.execute(
@@ -298,7 +310,7 @@ class Store:
     def session_count(self) -> int:
         return self.con.execute("SELECT COUNT(*) c FROM sessions").fetchone()["c"]
 
-    # -- messages ----------------------------------------------------------
+    # -- messages -----------------------------------------------------------
     def add(self, sid: str, role: str, content=None, tool_calls=None,
             tool_call_id=None, name=None, interrupted: int = 0) -> int:
         cur = self.con.execute(
@@ -331,11 +343,7 @@ class Store:
         return rows[:-int(keep)] if keep else list(rows)
 
     def unsummarized_older(self, sid: str, keep: int):
-        """Rows older than the newest `keep` that have not been summarised yet.
-
-        Without the watermark, every turn re-summarised the same old messages:
-        the count never dropped, so the trigger stayed true forever.
-        """
+        """Rows older than the newest `keep` that have not been summarised yet."""
         row = self.con.execute(
             "SELECT summarized_upto FROM sessions WHERE id=?", (sid,)).fetchone()
         upto = int(row["summarized_upto"] or 0) if row else 0
@@ -365,6 +373,16 @@ class Store:
         return self.con.execute(
             "SELECT COUNT(*) c FROM messages WHERE session_id=?", (sid,)).fetchone()["c"]
 
+    def last_user_message(self, sid: str):
+        return self.con.execute(
+            "SELECT * FROM messages WHERE session_id=? AND role='user' "
+            "ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
+
+    def delete_message(self, msg_id: int) -> bool:
+        self.con.execute("DELETE FROM messages WHERE id=?", (int(msg_id),))
+        self.con.execute("DELETE FROM messages_fts WHERE rowid=?", (int(msg_id),))
+        return True
+
     def search_messages(self, query: str, limit: int = 10):
         try:
             return self.con.execute(
@@ -375,9 +393,10 @@ class Store:
         except sqlite3.Error:
             return self.con.execute(
                 "SELECT session_id, role, content FROM messages "
-                "WHERE content LIKE ? LIMIT ?", ("%" + query + "%", int(limit))).fetchall()
+                "WHERE content LIKE ? LIMIT ?",
+                ("%" + query + "%", int(limit))).fetchall()
 
-    # -- memories ----------------------------------------------------------
+    # -- memories -----------------------------------------------------------
     def memory_add(self, content: str, kind: str = "fact", session_id: str = "",
                    agent_id: str = "", confidence: float = 1.0) -> int:
         cur = self.con.execute(
@@ -422,7 +441,7 @@ class Store:
     def memory_count(self) -> int:
         return self.con.execute("SELECT COUNT(*) c FROM memories").fetchone()["c"]
 
-    # -- notes / team ------------------------------------------------------
+    # -- notes / team --------------------------------------------------------
     def note_add(self, content: str, session_id: str = "", agent_id: str = "",
                  kind: str = "note", confidence: float = 1.0) -> int:
         cur = self.con.execute(
@@ -435,6 +454,9 @@ class Store:
         return self.con.execute(
             "SELECT session_id, agent_id, kind, content, created_at FROM notes "
             "ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+
+    def team_add(self, content: str, agent_id: str = "") -> int:
+        return self.note_add(content, agent_id=agent_id, kind="team")
 
     def agent_send(self, to_agent: str, body: str, from_agent: str = "") -> int:
         cur = self.con.execute(
@@ -452,7 +474,56 @@ class Store:
                 (now(), agent_id))
         return rows
 
-    # -- providers ---------------------------------------------------------
+    # -- kanban ---------------------------------------------------------------
+    def kanban_list(self, session_id: str = ""):
+        sql = "SELECT * FROM kanban"
+        params: list = []
+        if session_id:
+            sql += " WHERE session_id=?"
+            params.append(session_id)
+        sql += " ORDER BY priority DESC, created_at DESC"
+        return self.con.execute(sql, params).fetchall()
+
+    def kanban_add(self, title: str, description: str = "", status: str = "todo",
+                   priority: int = 0, session_id: str = "") -> int:
+        cur = self.con.execute(
+            "INSERT INTO kanban(title,description,status,priority,session_id,"
+            "created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+            (title, description, status, priority, session_id, now(), now()))
+        return _last_id(cur)
+
+    def kanban_update(self, kid: int, **kwargs) -> bool:
+        allowed = {"title", "description", "status", "priority", "assignee"}
+        sets, params = [], []
+        for k, v in kwargs.items():
+            if k in allowed and v is not None:
+                sets.append("%s=?" % k)
+                params.append(v)
+        if not sets:
+            return False
+        sets.append("updated_at=?")
+        params.append(now())
+        params.append(kid)
+        self.con.execute(
+            "UPDATE kanban SET %s WHERE id=?" % ", ".join(sets), params)
+        return True
+
+    def kanban_get(self, kid: int):
+        return self.con.execute(
+            "SELECT * FROM kanban WHERE id=?", (int(kid),)).fetchone()
+
+    def kanban_comment_add(self, kid: int, content: str, author: str = "") -> int:
+        cur = self.con.execute(
+            "INSERT INTO kanban_comments(kanban_id, content, author, created_at) "
+            "VALUES(?,?,?,?)", (int(kid), content, author, now()))
+        return _last_id(cur)
+
+    def kanban_comments(self, kid: int):
+        return self.con.execute(
+            "SELECT * FROM kanban_comments WHERE kanban_id=? ORDER BY created_at",
+            (kid,)).fetchall()
+
+    # -- providers -----------------------------------------------------------
     def provider_add(self, pid: str, base_url: str, label: str = "",
                      api_style: str = "openai", default_model: str = "",
                      headers: dict | None = None, priority: int = 100,
@@ -468,6 +539,11 @@ class Store:
             (pid, label or pid, base_url, api_style, default_model,
              json.dumps(headers) if headers else None, int(priority), models_json))
 
+    def _provider_dict(self, row) -> dict:
+        d = dict(row)
+        d["models"] = models_of(row)
+        return d
+
     def provider_remove(self, pid: str) -> None:
         self.con.execute("DELETE FROM provider_keys WHERE provider_id=?", (pid,))
         self.con.execute("DELETE FROM providers WHERE id=?", (pid,))
@@ -478,11 +554,6 @@ class Store:
             sql += " WHERE enabled=1"
         sql += " ORDER BY priority ASC, id ASC"
         return [self._provider_dict(r) for r in self.con.execute(sql).fetchall()]
-
-    def _provider_dict(self, row) -> dict:
-        d = dict(row)
-        d["models"] = models_of(row)
-        return d
 
     def provider_get(self, pid: str):
         row = self.con.execute("SELECT * FROM providers WHERE id=?", (pid,)).fetchone()
@@ -528,7 +599,7 @@ class Store:
         return self.con.execute(
             "SELECT status, COUNT(*) c FROM provider_keys GROUP BY status").fetchall()
 
-    # -- usage -------------------------------------------------------------
+    # -- usage ---------------------------------------------------------------
     def usage_add(self, provider_id: str, key_id: int, requests: int = 1,
                   prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
         self.con.execute(
@@ -553,7 +624,13 @@ class Store:
             "FROM usage").fetchone()
         return row
 
-    # -- todos -------------------------------------------------------------
+    def usage_by_provider(self):
+        return self.con.execute(
+            "SELECT provider_id, SUM(requests) r, SUM(prompt_tokens) p, "
+            "SUM(completion_tokens) c FROM usage "
+            "GROUP BY provider_id ORDER BY SUM(requests) DESC").fetchall()
+
+    # -- todos -----------------------------------------------------------------
     def todo_add(self, text: str) -> int:
         cur = self.con.execute(
             "INSERT INTO todos(text, created_at) VALUES(?,?)", (text, now()))
@@ -574,7 +651,7 @@ class Store:
         cur = self.con.execute("DELETE FROM todos WHERE done=1")
         return cur.rowcount
 
-    # -- jobs --------------------------------------------------------------
+    # -- jobs -------------------------------------------------------------------
     def job_add(self, schedule: str, command: str, kind: str = "shell",
                 next_run: int = 0) -> int:
         cur = self.con.execute(

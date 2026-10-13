@@ -185,7 +185,7 @@ def main() -> int:
     # ---------------------------------------------------------------- tools
     section("tools")
     t = tools.Tools(cfg, store, None, pool)
-    check("40 tools registered", len(t.names()) == 40, "%d" % len(t.names()))
+    check("45 tools registered", len(t.names()) == 45, "%d" % len(t.names()))
     check("every tool has a schema",
           all(s.get("function", {}).get("name") for s in t.schemas()))
 
