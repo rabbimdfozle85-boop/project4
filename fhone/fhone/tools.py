@@ -540,8 +540,8 @@ class Tools:
         except subprocess.TimeoutExpired:
             return "error: timeout: %ss exceeded" % secs
         out = proc.stdout or ""
-        if proc.returncode:
-            out += ("\n" if out else "") + (proc.stderr or "")[-2000:]
+        if proc.stderr:
+            out += ("\n" if out else "") + proc.stderr[-2000:]
         return out or "(no output)"
 
     # -- memory ------------------------------------------------------------

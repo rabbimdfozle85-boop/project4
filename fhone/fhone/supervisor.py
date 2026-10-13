@@ -217,6 +217,20 @@ class Supervisor:
 
         # --- main loop ----------------------------------------------------
         while not self.stop_event.is_set():
+            # Health check: restart dead background threads
+            for th in list(self.threads):
+                if not th.is_alive():
+                    self.log("supervisor: thread %s died, restarting" % th.name)
+                    if th.name == "telegram" and self.telegram is not None:
+                        th = threading.Thread(target=self.telegram.run,
+                                              name="telegram", daemon=True)
+                        th.start()
+                        self.threads.append(th)
+                    elif th.name == "scheduler":
+                        th = threading.Thread(target=self._scheduler_loop,
+                                              name="scheduler", daemon=True)
+                        th.start()
+                        self.threads.append(th)
             self.stop_event.wait(5.0)
 
         self.log("supervisor shutting down")
