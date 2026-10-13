@@ -267,20 +267,20 @@ def cmd_provider(cfg: dict, args) -> int:
         elif args.action == "add":
             if not args.name or not args.url:
                 print("usage: fhone provider add <id> <base_url> [--style S] "
-                      "[--model M] [--models a,b,c]")
+                      "[--model M] [--priority N]")
                 return 2
-            models = [m.strip() for m in (args.models or "").split(",") if m.strip()]
+            models = [m.strip() for m in (args.extra or "").split(",") if m.strip()]
             pool.add_provider(args.name, args.url, api_style=args.style or "openai",
                               model=args.model or "", priority=args.priority or 100,
                               models=models or None)
             print("added provider %s" % args.name)
         elif args.action == "models":
-            if not args.name or args.models is None:
+            if not args.name or args.url is None:
                 print("usage: fhone provider models <id> <m1,m2,...|'*'   "
                       "(* = any model)")
                 return 2
-            models = [] if args.models == "*" else [
-                m.strip() for m in args.models.split(",") if m.strip()]
+            models = [] if args.url == "*" else [
+                m.strip() for m in args.url.split(",") if m.strip()]
             pool.set_provider_models(args.name, models)
             if models:
                 print("%s serves %s" % (args.name, ", ".join(models)))
@@ -307,6 +307,55 @@ def cmd_provider(cfg: dict, args) -> int:
         pool.close()
         store.close()
     return 0
+
+
+def cmd_config(cfg: dict, args) -> int:
+    """Get, set, or list configuration values."""
+    action = args.action or "list"
+    try:
+        if action == "set":
+            if not args.name or args.url is None:
+                print("usage: fhone config set <key> <value>")
+                return 2
+            key = args.name
+            value = args.url
+            # Try to parse as int/float/bool, else keep as string
+            if value.lower() == "true":
+                value = True
+            elif value.lower() == "false":
+                value = False
+            else:
+                try:
+                    value = int(value)
+                except ValueError:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        pass
+            cfg[key] = value
+            config_mod.save(cfg)
+            print("set %s = %s" % (key, value))
+            return 0
+        elif action == "get":
+            if not args.name:
+                print("usage: fhone config get <key>")
+                return 2
+            val = cfg.get(args.name, "(not set)")
+            print("%s = %s" % (args.name, val))
+            return 0
+        elif action == "list":
+            print("FHONE config")
+            for k in sorted(cfg.keys()):
+                if k.startswith("_"):
+                    continue
+                print("  %-24s %s" % (k, cfg[k]))
+            return 0
+        else:
+            print("usage: fhone config {list|get|set}")
+            return 2
+    except Exception as e:
+        print("config error: %s: %s" % (type(e).__name__, e))
+        return 1
 
 
 def cmd_status(cfg: dict, args) -> int:
@@ -525,7 +574,7 @@ def main(argv=None) -> int:
                     choices=["chat", "install", "backup", "restore", "provider",
                              "status", "skills", "doctor", "version",
                              "start", "stop", "restart", "service", "boot",
-                             "portal", "telegram", "_supervise"])
+                             "portal", "telegram", "config", "_supervise"])
     ap.add_argument("-q", "--query", help="one-shot query, print the answer and exit")
     ap.add_argument("--session", help="session id to use or resume")
     ap.add_argument("--model", help="override the configured model")
@@ -535,12 +584,8 @@ def main(argv=None) -> int:
     ap.add_argument("--label", help="backup label")
     ap.add_argument("-o", "--output", help="backup output path")
     ap.add_argument("--send", help="send the backup to a gateway target (e.g. telegram)")
-    ap.add_argument("--name", help="provider/skill name")
-    ap.add_argument("--url", help="provider base url")
     ap.add_argument("--key", help="api key")
     ap.add_argument("--style", help="provider wire style")
-    ap.add_argument("--models",
-                    help="comma-separated model allow-list (* or empty = any)")
     ap.add_argument("--priority", type=int, help="provider priority")
     ap.add_argument("--tier", type=int, help="skill tier filter")
     ap.add_argument("--skip-nous", action="store_true", help="install: skip Nous sign-in")
@@ -549,7 +594,10 @@ def main(argv=None) -> int:
     ap.add_argument("--no-path", action="store_true", help="install: skip the command binding")
     ap.add_argument("--foreground", action="store_true",
                     help="start: run in the foreground instead of detaching")
-    ap.add_argument("action", nargs="?", help="sub-action (provider/skills/portal/telegram/service)")
+    ap.add_argument("action", nargs="?", help="sub-action (provider/skills/portal/telegram/service/config)")
+    ap.add_argument("name", nargs="?", default=None, help="provider/skill/config name")
+    ap.add_argument("url", nargs="?", default=None, help="provider base url or config value")
+    ap.add_argument("extra", nargs="?", default=None, help="extra value (models list, etc.)")
 
     args = ap.parse_args(argv)
     cfg = config_mod.load()
@@ -588,6 +636,8 @@ def main(argv=None) -> int:
         return cmd_portal(cfg, args)
     if args.command == "telegram":
         return cmd_telegram(cfg, args)
+    if args.command == "config":
+        return cmd_config(cfg, args)
     if args.command == "chat":
         if args.model:
             cfg["model"] = args.model
