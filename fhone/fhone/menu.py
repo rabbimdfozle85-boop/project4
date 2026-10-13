@@ -125,7 +125,7 @@ def show_menu(title: str, options: list[tuple], cancel: bool = True) -> int:
             val = input("  %s: " % c("Select", BOLD)).strip()
         except (EOFError, KeyboardInterrupt):
             print()
-            return -1
+            raise SystemExit(0)
         
         if val == "0" and cancel:
             return -1

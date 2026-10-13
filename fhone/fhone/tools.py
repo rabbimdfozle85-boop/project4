@@ -617,6 +617,21 @@ class Tools:
 
     # -- network -----------------------------------------------------------
     def _fetch(self, url: str, headers: dict | None = None, timeout: int = 30):
+        # SSRF protection: block file://, ftp://, and private IP ranges
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return "error: invalid_scheme: %s" % parsed.scheme
+        host = parsed.hostname or ""
+        if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1", ""):
+            return "error: blocked_host: %s" % host
+        try:
+            import ipaddress
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_reserved:
+                return "error: blocked_private_ip: %s" % host
+        except ValueError:
+            pass  # Not an IP, it's a hostname — allow it
         h = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
         h.update(headers or {})
         req = urllib.request.Request(url, headers=h)
@@ -626,7 +641,10 @@ class Tools:
             raw = resp.read(cap + 1024)
             if (resp.headers.get("Content-Encoding") or "").lower() == "gzip":
                 import gzip
-                raw = gzip.decompress(raw)
+                try:
+                    raw = gzip.decompress(raw)
+                except (gzip.BadGzipFile, OSError, EOFError):
+                    pass  # Server lied about gzip — use raw bytes
         return raw.decode("utf-8", "replace")
 
     def web_search(self, query: str, limit: int = 5) -> str:

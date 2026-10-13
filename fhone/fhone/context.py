@@ -80,10 +80,11 @@ def build(store, sid: str, cfg: dict, extra_system: list | None = None) -> list:
                         tool_call_ids.add(c["id"])
             except (ValueError, TypeError):
                 pass
-    if tool_call_ids:
-        selected = [r for r in selected
-                    if r["role"] != "tool"
-                    or r["tool_call_id"] in tool_call_ids]
+    # Always filter tool results — even when tool_call_ids is empty,
+    # orphaned tool results (no matching assistant call) must be removed.
+    selected = [r for r in selected
+                if r["role"] != "tool"
+                or r["tool_call_id"] in tool_call_ids]
 
     out.extend(to_api(r) for r in selected)
     return out
