@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.zip
+.env
+config.json
+auth.json
+*.db
+*.db-shm
+*.db-wal
+.venv/
+venv/
