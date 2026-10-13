@@ -198,5 +198,35 @@ class TestMenuEOF(unittest.TestCase):
                       "show_menu must raise SystemExit on EOF")
 
 
+class TestStatusBarProviderHealth(unittest.TestCase):
+    """Status bar must show per-provider health, not just a global count."""
+
+    def test_status_bar_shows_providers(self):
+        from fhone.ui import UI
+        import io
+        stream = io.StringIO()
+        ui = UI(stream=stream)
+        state = {
+            "status_bar": True,
+            "model": "test-model",
+            "health": {
+                "ok": 1,
+                "providers": [
+                    {"id": "nous", "state": "1/1 keys", "label": "Nous"},
+                    {"id": "pollinations", "state": "no keys", "label": "Poll"},
+                ],
+            },
+            "usage": {"requests": 10, "prompt_tokens": 100, "completion_tokens": 50},
+            "context": {"messages": 3, "window": 12},
+        }
+        ui.status_bar(state)
+        output = stream.getvalue()
+        self.assertIn("nous", output)
+        self.assertIn("pollinations", output)
+        self.assertIn("nokeys", output)
+        self.assertIn("ctx 3/12", output)
+        self.assertIn("tok 150", output)
+
+
 if __name__ == "__main__":
     unittest.main()

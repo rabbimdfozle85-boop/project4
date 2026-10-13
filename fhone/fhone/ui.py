@@ -157,11 +157,30 @@ class UI:
         if not state.get("status_bar", True):
             return
         health = state.get("health") or {}
+        providers = health.get("providers") or []
         parts = [
-            state.get("provider") or "-",
             state.get("model") or "-",
-            "keys %d/%d" % (health.get("ok", 0), len(health.get("providers") or [])),
         ]
+        # Show per-provider key health: provider:ok/cooling/dead
+        if providers:
+            prov_parts = []
+            for p in providers:
+                pid = p.get("id", "?")
+                pstate = p.get("state", "?")
+                # Color-code: green if ok, yellow if cooling, red if dead/no keys
+                if "ok" in pstate or pstate == "keyless":
+                    prov_parts.append(c(pid, GREEN))
+                elif "cooling" in pstate:
+                    prov_parts.append(c(pid, YELLOW))
+                elif "no keys" in pstate:
+                    prov_parts.append(c(pid + ":nokeys", RED))
+                elif "dead" in pstate:
+                    prov_parts.append(c(pid + ":dead", RED))
+                else:
+                    prov_parts.append(c(pid, DIM))
+            parts.append(" ".join(prov_parts))
+        else:
+            parts.append(c("no providers", RED))
         usage = state.get("usage") or {}
         if usage.get("requests"):
             parts.append("tok %s" % _short_num(
