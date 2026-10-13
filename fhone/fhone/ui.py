@@ -6,7 +6,9 @@ mode, subagents, tests) with a no-op UI.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import time as _t
 
 try:
     import readline  # noqa: F401  enables history/editing in input()
@@ -39,30 +41,55 @@ FHONE commands
     /sessions           list recent sessions
     /resume <id>        switch to a session
     /rename <title>     title the current session
+    /history [n]        show last n messages (default 10)
     /search <query>     search all past messages
     /export [path]      dump the session as JSON
     /prune <days>       delete messages older than N days
+    /branch [title]     branch current session into a new one
+    /undo [n]           undo last n user turns (default 1)
+    /retry              retry the last message
+    /clear              clear screen and start fresh
   config
     /model [name]       show or set the model
     /provider [list|add|remove]   manage providers
     /keys [provider]    key pool health
     /config             show effective config (secrets masked)
+    /yolo               toggle shell approval for this session
+    /verbose            toggle verbose tool output
+    /focus              toggle focus view (prompt + answer only)
+    /timestamps         toggle timestamps on messages
+    /approvals          show/set approval mode
+    /reasoning          manage reasoning effort
+    /fast               toggle fast mode
   tools
     /tools              list available tools
     /skills [query]     list indexed skills
     /skill <name>       load a skill body
     /todo [list|add ...]  task list
     /jobs               scheduled jobs
-  info
-    /status             full status: providers, keys, usage, context
-    /usage              token and request usage
-    /context            context window fill
+    /cron               manage scheduled tasks (list/add/remove)
     /memory [query]     search or list memories
     /remember <text>    save a memory
     /forget <id>        delete a memory
     /team               recent notes from all sessions
+  info
+    /status             full status: providers, keys, usage, context
+    /usage              token and request usage
+    /context            context window fill
+    /battery            battery status (Termux:API)
+    /whoami             show user identity
+    /profile            show profile info
+    /diff               show git diff (if in a git repo)
   control
-    /yolo               toggle shell approval for this session
+    /save               export conversation (alias for /export)
+    /snapshot           create a state snapshot
+    /rollback           restore from a snapshot
+    /steer <text>       inject a message after next tool call
+    /goal <text>        set a standing goal
+    /refine             review conversation and save lessons
+    /review             spawn a review subagent
+    /plan <text>        write an implementation plan
+    /compress           compress conversation context
     /help               this text
     /exit               quit
   !<command>            run a shell command directly
@@ -337,6 +364,241 @@ def dispatch(line: str, state: dict) -> bool:
     elif cmd == "yolo":
         cfg["_yolo"] = not cfg.get("_yolo")
         ui.note("shell approval: %s" % ("DISABLED (yolo)" if cfg["_yolo"] else "enabled"))
+
+    elif cmd == "history":
+        n = int(arg) if arg.isdigit() else 10
+        rows = store.window(state["session"], n)
+        if not rows:
+            ui.note("no messages yet")
+        for r in rows:
+            ts = ""
+            if cfg.get("timestamps") and r.get("created_at"):
+                import time as _t
+                ts = " [%s]" % _t.strftime("%H:%M", _t.localtime(r["created_at"]))
+            ui.note("  %s%s: %s" % (r["role"], ts, (r["content"] or "")[:120]))
+
+    elif cmd == "clear":
+        os.system("clear" if os.name != "nt" else "cls")
+        state["session"] = state["new_session_id"]()
+        store.ensure_session(state["session"], cfg.get("model", ""))
+        ui.note("cleared — new session: %s" % state["session"])
+
+    elif cmd == "branch":
+        old = state["session"]
+        new = state["new_session_id"]()
+        store.ensure_session(new, cfg.get("model", ""))
+        rows = store.window(old, 10000)
+        for r in rows:
+            store.add(new, r["role"], r["content"],
+                      tool_calls=r.get("tool_calls"),
+                      tool_call_id=r.get("tool_call_id"),
+                      name=r.get("name"))
+        if arg:
+            store.set_title(new, arg)
+        state["session"] = new
+        ui.note("branched %s -> %s (%d messages)" % (old, new, len(rows)))
+
+    elif cmd == "undo":
+        n = int(arg) if arg.isdigit() else 1
+        undone = 0
+        for _ in range(n):
+            last = store.last_user_message(state["session"])
+            if not last:
+                break
+            store.delete_message(last["id"])
+            undone += 1
+        ui.note("undid %d turn(s)" % undone)
+
+    elif cmd == "retry":
+        last = store.last_user_message(state["session"])
+        if not last:
+            ui.note("nothing to retry")
+        else:
+            ui.note("retrying: %s" % (last["content"] or "")[:60])
+            state["retry"] = last["content"]
+
+    elif cmd == "verbose":
+        cfg["verbose"] = not cfg.get("verbose", False)
+        ui.note("verbose tool output: %s" % ("on" if cfg["verbose"] else "off"))
+
+    elif cmd == "focus":
+        cfg["focus"] = not cfg.get("focus", False)
+        ui.note("focus mode: %s" % ("on (prompt + answer only)" if cfg["focus"] else "off"))
+
+    elif cmd == "timestamps":
+        cfg["timestamps"] = not cfg.get("timestamps", False)
+        ui.note("timestamps: %s" % ("on" if cfg["timestamps"] else "off"))
+
+    elif cmd == "approvals":
+        mode = cfg.get("approve_shell", True)
+        if arg in ("on", "off", "yolo", "ask"):
+            mode = arg != "off"
+            cfg["approve_shell"] = mode
+            cfg["_yolo"] = (arg == "yolo")
+            ui.note("approvals: %s" % arg)
+        else:
+            ui.note("approvals: %s  (usage: /approvals on|off|yolo|ask)" % (
+                "yolo" if cfg.get("_yolo") else ("ask" if mode else "off")))
+
+    elif cmd == "reasoning":
+        if arg:
+            cfg["reasoning"] = arg
+            ui.note("reasoning = %s" % arg)
+        else:
+            ui.note("reasoning = %s" % (cfg.get("reasoning") or "(default)"))
+
+    elif cmd == "fast":
+        cfg["fast"] = not cfg.get("fast", False)
+        ui.note("fast mode: %s" % ("on" if cfg["fast"] else "off"))
+
+    elif cmd == "save":
+        import json as _json
+        rows = store.window(state["session"], 10000)
+        path = arg or ("%s-export.json" % state["session"])
+        with open(os.path.expanduser(path), "w", encoding="utf-8") as fh:
+            _json.dump([dict(r) for r in rows], fh, indent=2)
+        ui.note("saved %d messages to %s" % (len(rows), path))
+
+    elif cmd == "snapshot":
+        import json as _json, time as _t
+        snap_dir = os.path.join(cfg.get("home", "."), "snapshots")
+        os.makedirs(snap_dir, exist_ok=True)
+        snap = {
+            "session": state["session"],
+            "model": cfg.get("model"),
+            "messages": [dict(r) for r in store.window(state["session"], 10000)],
+            "created_at": int(_t.time()),
+        }
+        path = os.path.join(snap_dir, "snap-%s.json" % int(_t.time()))
+        with open(path, "w", encoding="utf-8") as fh:
+            _json.dump(snap, fh, indent=2)
+        ui.note("snapshot saved: %s" % path)
+
+    elif cmd == "rollback":
+        import json as _json
+        snap_dir = os.path.join(cfg.get("home", "."), "snapshots")
+        snaps = sorted([f for f in os.listdir(snap_dir) if f.endswith(".json")
+                        ]) if os.path.isdir(snap_dir) else []
+        if not snaps:
+            ui.note("no snapshots found")
+        elif arg:
+            path = os.path.join(snap_dir, arg)
+            if not os.path.exists(path):
+                ui.note("no such snapshot: %s" % arg)
+            else:
+                with open(path, encoding="utf-8") as fh:
+                    snap = _json.load(fh)
+                state["session"] = snap["session"]
+                store.ensure_session(snap["session"], snap.get("model") or "")
+                for m in snap.get("messages", []):
+                    store.add(snap["session"], m["role"], m["content"])
+                ui.note("rolled back to %s (%d messages)" % (
+                    snap["session"], len(snap.get("messages", []))))
+        else:
+            ui.note("snapshots:\n" + "\n".join("  %s" % s for s in snaps))
+
+    elif cmd == "steer":
+        if arg:
+            state["steer"] = arg
+            ui.note("steering after next tool call: %s" % arg[:60])
+        else:
+            ui.note("usage: /steer <text>")
+
+    elif cmd == "goal":
+        if arg:
+            store.memory_add("Standing goal: %s" % arg, "goal")
+            ui.note("goal set: %s" % arg[:60])
+        else:
+            rows = store.memory_search("goal")
+            ui.note("\n".join("- %s" % r["content"] for r in rows) or "no goals set")
+
+    elif cmd == "refine":
+        rows = store.memory_search("lesson")
+        lessons = [r["content"] for r in rows]
+        if lessons:
+            ui.note("lessons from memory:\n" + "\n".join("  - %s" % l for l in lessons[:10]))
+        else:
+            ui.note("no lessons saved yet")
+
+    elif cmd == "review":
+        ui.note("spawning review subagent...")
+        state["review"] = True
+
+    elif cmd == "plan":
+        if arg:
+            plans_dir = os.path.join(cfg.get("home", "."), "plans")
+            os.makedirs(plans_dir, exist_ok=True)
+            path = os.path.join(plans_dir, "plan-%s.md" % int(_t.time()))
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("# Plan\n\n%s\n" % arg)
+            ui.note("plan written to %s" % path)
+        else:
+            ui.note("usage: /plan <description>")
+
+    elif cmd == "compress":
+        n = int(arg) if arg.isdigit() else 5
+        rows = store.window(state["session"], 10000)
+        if len(rows) <= n * 2:
+            ui.note("nothing to compress (%d messages)" % len(rows))
+        else:
+            to_summarize = rows[:len(rows) - n]
+            summary = "Earlier conversation (%d turns): " % len(to_summarize)
+            summary += " ".join((r["content"] or "")[:100] for r in to_summarize
+                               if r["role"] == "user")
+            store.memory_add(summary[:2000], "summary")
+            for r in to_summarize:
+                store.delete_message(r["id"])
+            ui.note("compressed %d messages into a summary" % len(to_summarize))
+
+    elif cmd == "cron":
+        from . import scheduler as _sched
+        bits = arg.split(None, 2)
+        sub = bits[0] if bits else "list"
+        if sub == "list":
+            ui.note(_sched.manage(store, "list"))
+        elif sub == "add" and len(bits) >= 3:
+            ui.note(_sched.manage(store, "add", bits[1], bits[2]))
+        elif sub == "remove" and len(bits) >= 2:
+            ui.note(_sched.manage(store, "remove", bits[1]))
+        else:
+            ui.note("usage: /cron list | add '<schedule>' '<command>' | remove <id>")
+
+    elif cmd == "battery":
+        try:
+            probe = subprocess.run(["termux-battery-status"],
+                                   capture_output=True, text=True, timeout=5)
+            if probe.stdout.strip():
+                import json as _j
+                data = _j.loads(probe.stdout)
+                ui.note("  battery: %d%%  %s  %s" % (
+                    data.get("percentage", "?"),
+                    "charging" if data.get("status") == "CHARGING" else "discharging",
+                    data.get("health", "")))
+            else:
+                ui.note("  battery: Termux:API app not installed")
+        except Exception as e:
+            ui.note("  battery: unavailable (%s)" % e)
+
+    elif cmd == "whoami":
+        ui.note("  you are: %s" % (os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"))
+
+    elif cmd == "profile":
+        ui.note("  profile: default")
+        ui.note("  home:    %s" % cfg.get("home", "."))
+        ui.note("  db:      %s" % cfg.get("db", ""))
+        ui.note("  model:   %s" % (cfg.get("model") or "(unset)"))
+
+    elif cmd == "diff":
+        import subprocess as _sp
+        try:
+            result = _sp.run(["git", "diff", "--stat"], capture_output=True,
+                             text=True, timeout=10)
+            if result.stdout.strip():
+                ui.note(result.stdout)
+            else:
+                ui.note("no git changes")
+        except Exception as e:
+            ui.note("diff unavailable: %s" % e)
 
     else:
         ui.note("unknown command: /%s  (try /help)" % cmd)

@@ -111,6 +111,24 @@ S_CLARIFY = _fn("clarify", "Ask the user a question when the decision is theirs.
                 {"question": {"type": "string"},
                  "choices": {"type": "array", "items": {"type": "string"}}},
                 ["question"])
+S_HTTP_POST = _fn("http_post", "POST data to a URL. Body is JSON if dict, else raw text.",
+                  {"url": {"type": "string"}, "data": {},
+                   "headers": {"type": "object"}}, ["url"])
+S_SYSINFO = _fn("sysinfo", "Disk, memory, CPU, and uptime info.",
+                 {"section": {"type": "string"}}, [])
+S_FMOVE = _fn("file_move", "Move a file or directory.",
+               {"src": {"type": "string"}, "dst": {"type": "string"}},
+               ["src", "dst"])
+S_FCOPY = _fn("file_copy", "Copy a file or directory.",
+               {"src": {"type": "string"}, "dst": {"type": "string"}},
+               ["src", "dst"])
+S_FDELETE = _fn("file_delete", "Delete a file or directory.",
+                 {"path": {"type": "string"}}, ["path"])
+S_ENVGET = _fn("env_get", "Get an environment variable.",
+                {"name": {"type": "string"}}, ["name"])
+S_ENVSET = _fn("env_set", "Set an environment variable for this session.",
+                {"name": {"type": "string"}, "value": {"type": "string"}},
+                ["name", "value"])
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +136,16 @@ S_CLARIFY = _fn("clarify", "Ask the user a question when the decision is theirs.
 # ---------------------------------------------------------------------------
 
 _BACKGROUND: dict = {}
+
+
+def _human_duration(seconds: float) -> str:
+    if seconds < 60:
+        return "%ds" % int(seconds)
+    if seconds < 3600:
+        return "%dm" % (seconds // 60)
+    if seconds < 86400:
+        return "%dh%dm" % (seconds // 3600, (seconds % 3600) // 60)
+    return "%dd%dh" % (seconds // 86400, (seconds % 86400) // 3600)
 
 
 def _bg_id() -> str:
@@ -224,6 +252,13 @@ class Tools:
             "image_generate": (S_IMG, self.image_generate),
             "text_to_speech": (S_TTS, self.text_to_speech),
             "clarify": (S_CLARIFY, self.clarify),
+            "http_post": (S_HTTP_POST, self.http_post),
+            "sysinfo": (S_SYSINFO, self.sysinfo),
+            "file_move": (S_FMOVE, self.file_move),
+            "file_copy": (S_FCOPY, self.file_copy),
+            "file_delete": (S_FDELETE, self.file_delete),
+            "env_get": (S_ENVGET, self.env_get),
+            "env_set": (S_ENVSET, self.env_set),
         }
 
     # -- registry ----------------------------------------------------------
@@ -559,6 +594,121 @@ class Tools:
             return "error: fetch_failed: %s" % e
 
     # -- multimodal --------------------------------------------------------
+    def http_post(self, url: str, data: str | None = None,
+                 headers: dict | None = None) -> str:
+        """POST data to a URL. Body is JSON if dict, else raw text."""
+        import json as _json
+        hdrs = {"Content-Type": "application/json"}
+        if headers:
+            hdrs.update(headers)
+        body = None
+        if data is not None:
+            if isinstance(data, (dict, list)):
+                body = _json.dumps(data).encode()
+            else:
+                body = str(data).encode()
+                hdrs["Content-Type"] = "text/plain"
+        req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8", "replace")[:10000]
+        except urllib.error.HTTPError as e:
+            return "HTTP %d: %s" % (e.code, e.read().decode("utf-8", "replace")[:2000])
+        except Exception as e:
+            return "error: %s: %s" % (type(e).__name__, e)
+
+    def sysinfo(self, section: str = "all") -> str:
+        """Disk, memory, CPU, and uptime info. Pure stdlib."""
+        import platform
+        lines = []
+        if section in ("all", "disk"):
+            try:
+                st = os.statvfs(".")
+                free = st.f_bavail * st.f_frsize
+                total = st.f_blocks * st.f_frsize
+                lines.append("  disk: %.1f GB free / %.1f GB total" % (
+                    free / 1e9, total / 1e9))
+            except Exception:
+                lines.append("  disk: unavailable")
+        if section in ("all", "mem"):
+            try:
+                with open("/proc/meminfo") as fh:
+                    mem = {}
+                    for line in fh:
+                        if ":" in line:
+                            k, v = line.split(":", 1)
+                            mem[k.strip()] = v.strip()
+                total = int(mem.get("MemTotal", "0 kB").split()[0]) * 1024
+                avail = int(mem.get("MemAvailable", "0 kB").split()[0]) * 1024
+                lines.append("  memory: %.1f GB free / %.1f GB total" % (
+                    avail / 1e9, total / 1e9))
+            except Exception:
+                lines.append("  memory: unavailable")
+        if section in ("all", "cpu"):
+            try:
+                with open("/proc/cpuinfo") as fh:
+                    model = ""
+                    cores = 0
+                    for line in fh:
+                        if "model name" in line and not model:
+                            model = line.split(":", 1)[1].strip()
+                        if "processor" in line:
+                            cores += 1
+                lines.append("  cpu: %s (%d cores)" % (model or "unknown", cores))
+            except Exception:
+                lines.append("  cpu: unavailable")
+        if section in ("all", "uptime"):
+            try:
+                with open("/proc/uptime") as fh:
+                    secs = float(fh.read().split()[0])
+                lines.append("  uptime: %s" % _human_duration(secs))
+            except Exception:
+                lines.append("  uptime: unavailable")
+        return "\n".join(lines) or "sysinfo: no info"
+
+    def file_move(self, src: str, dst: str) -> str:
+        """Move a file or directory."""
+        import shutil
+        try:
+            shutil.move(src, dst)
+            return "moved %s -> %s" % (src, dst)
+        except Exception as e:
+            return "error: %s" % e
+
+    def file_copy(self, src: str, dst: str) -> str:
+        """Copy a file or directory."""
+        import shutil
+        try:
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+            return "copied %s -> %s" % (src, dst)
+        except Exception as e:
+            return "error: %s" % e
+
+    def file_delete(self, path: str) -> str:
+        """Delete a file or directory."""
+        import shutil
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.unlink(path)
+            return "deleted %s" % path
+        except Exception as e:
+            return "error: %s" % e
+
+    def env_get(self, name: str) -> str:
+        """Get an environment variable."""
+        val = os.environ.get(name)
+        return val if val is not None else "(not set)"
+
+    def env_set(self, name: str, value: str) -> str:
+        """Set an environment variable for this session."""
+        os.environ[name] = value
+        return "set %s = %s" % (name, value)
+
     def vision_analyze(self, image: str, question: str) -> str:
         return ("error: no_vision_provider: configure a vision-capable provider "
                 "and set vision.model")
