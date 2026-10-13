@@ -221,9 +221,15 @@ def _install_command() -> None:
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
         launcher = target_dir / "fhone"
+        # Resolve the real install dir (where this file lives) so the command
+        # works from any cwd, not just the install directory.
+        install_dir = Path(__file__).resolve().parent.parent
         launcher.write_text(
             _launcher_shebang() + "\n"
-            "exec python3 -m fhone \"$@\"\n", encoding="utf-8")
+            "FHONE_DIR=%s\n"
+            "cd \"$FHONE_DIR\" || exit 1\n"
+            "exec python3 -m fhone \"$@\"\n" % install_dir,
+            encoding="utf-8")
         launcher.chmod(0o755)
         print("  ok   command bound: %s" % launcher)
     except OSError as e:

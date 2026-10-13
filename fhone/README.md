@@ -122,11 +122,67 @@ command brings it back, losslessly.
 ### Slash commands (in the REPL)
 
 ```
-/new /sessions /resume /rename /search /export /prune
-/model /provider /keys /config
-/tools /skills /skill /todo /jobs
-/status /usage /context /memory /remember /forget /team
-/yolo /help /exit
+session
+  /new [title]        start a fresh session
+  /sessions           list recent sessions
+  /resume <id>        switch to a session
+  /rename <title>     title the current session
+  /history [n]        show last n messages (default 10)
+  /search <query>     search all past messages
+  /export [path]      dump the session as JSON
+  /prune <days>       delete messages older than N days
+  /branch [title]     branch current session into a new one
+  /undo [n]           undo last n user turns (default 1)
+  /retry              retry the last message
+  /clear              clear screen and start fresh
+
+config
+  /model [name]       show or set the model
+  /provider [list|add|remove]   manage providers
+  /keys [provider]    key pool health
+  /config             show effective config (secrets masked)
+  /yolo               toggle shell approval for this session
+  /verbose            toggle verbose tool output
+  /focus              toggle focus view (prompt + answer only)
+  /timestamps         toggle timestamps on messages
+  /approvals          show/set approval mode
+  /reasoning          manage reasoning effort
+  /fast               toggle fast mode
+
+tools
+  /tools              list available tools
+  /skills [query]     list indexed skills
+  /skill <name>       load a skill body
+  /todo [list|add ...]  task list
+  /jobs               scheduled jobs
+  /cron               manage scheduled tasks (list/add/remove)
+  /memory [query]     search or list memories
+  /remember <text>    save a memory
+  /forget <id>        delete a memory
+  /team               recent notes from all sessions
+
+info
+  /status             full status: providers, keys, usage, context
+  /usage              token and request usage
+  /context            context window fill
+  /battery            battery status (Termux:API)
+  /whoami             show user identity
+  /profile            show profile info
+  /diff               show git diff (if in a git repo)
+
+control
+  /save               export conversation (alias for /export)
+  /snapshot           create a state snapshot
+  /rollback           restore from a snapshot
+  /steer <text>       inject a message after next tool call
+  /goal <text>        set a standing goal
+  /refine             review conversation and save lessons
+  /review             spawn a review subagent
+  /plan <text>        write an implementation plan
+  /compress           compress conversation context
+  /help               this text
+  /exit               quit
+
 !<command>          run a shell command directly
 ```
 
@@ -158,13 +214,14 @@ Usage is recorded per key per day and shown in the status bar.
 
 ---
 
-## Tools (23)
+## Tools (30)
 
 `read_file` `write_file` `patch` `search_files` `list_dir` `terminal`
 `process_manage` `execute_code` `memory` `session_search` `todo_list`
 `skills_list` `skill_view` `skill_manage` `delegate_task` `cronjob_manage`
-`web_search` `web_extract` `http_get` `vision_analyze` `image_generate`
-`text_to_speech` `clarify`
+`web_search` `web_extract` `http_get` `http_post` `vision_analyze` `image_generate`
+`text_to_speech` `clarify` `sysinfo` `file_move` `file_copy` `file_delete`
+`env_get` `env_set`
 
 Every tool: returns a string, never raises into the turn loop, caps its output,
 validates its arguments, sandboxes its paths, and has a timeout.
@@ -231,7 +288,7 @@ replaced.
 | `llm.py` | the only inference network code: connection reuse, SSE, retry, gzip |
 | `providers.py` | registry, key pools, rotation, fallback, usage |
 | `context.py` | window + token budget + rolling summary with a watermark |
-| `tools.py` | the 23-tool registry |
+| `tools.py` | the 30-tool registry |
 | `agent.py` | the turn loop |
 | `skills.py` | index, on-demand loading, self-editing |
 | `delegate.py` | subagents, capped in the parent |
@@ -285,22 +342,36 @@ All durable state is in SQLite, so a restart is cheap and lossless.
 
 ```sh
 python3 tests/test_fhone.py        # 100 assertions — the whole core surface
-python3 tests/test_regressions.py  #  23 assertions — one per fixed bug
-python3 tests/test_migration.py    #  15 assertions — v1 database upgrades in place
+python3 tests/test_regressions.py  #  26 assertions — one per fixed bug
+python3 tests/test_migration.py    #  19 assertions — v1→v3 database migrations
 python3 tests/test_surfaces.py     #  46 assertions — portal, Telegram, supervisor
 python3 tests/measure.py           # footprint, measured from the kernel
 ```
 
-184 assertions, all offline, no API key.
+191 assertions, all offline, no API key.
 
 The suites cover the store, FTS5, provider rotation and quarantine, SSE parsing
 with split tool arguments, every tool's happy path and error surface, sandbox
-escapes, output caps, skills, scheduling, backup/restore, an end-to-end turn, a
-real v1→v2 database migration, the portal's routes and its mandatory auth off
+escapes, output caps, skills, scheduling, backup/restore, an end-to-end turn,
+database migrations (v1→v3), the portal's routes and its mandatory auth off
 loopback, Telegram message splitting and command handling, and a real
 supervisor start/stop/restart cycle against a live pidfile.
 
 ## Changelog
+
+### 1.001
+
+- 25 new slash commands: /history /clear /branch /undo /retry /verbose /focus
+  /timestamps /approvals /reasoning /fast /save /snapshot /rollback /steer
+  /goal /refine /review /plan /compress /cron /battery /whoami /profile /diff
+- 7 new tools: http_post sysinfo file_move file_copy file_delete env_get env_set
+- Provider model routing: providers declare which models they serve; the pool
+  never asks a provider for a model it does not have
+- `fhone config set/get/list` command
+- CLI: `provider add` and `provider models` take positional args
+- Schema v3 (`providers.models` column); v1→v3 migration tested
+- Install no longer crashes when the Termux:API app is absent
+- 191 test assertions (was 138)
 
 ### 0.0099
 
