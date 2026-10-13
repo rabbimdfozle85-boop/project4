@@ -192,6 +192,12 @@ def cmd_install(cfg: dict, args) -> int:
             print("       Add a provider by hand instead: fhone provider add ...")
 
     print("\n%s" % ("install complete." if ok else "install finished WITH ERRORS."))
+
+    if ok and not cfg.get("model"):
+        print("\n  Starting interactive setup...")
+        from . import setup as setup_mod
+        setup_mod.run(cfg)
+
     print("run:  fhone")
     return 0 if ok else 1
 
@@ -577,7 +583,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="fhone", description="FHONE — a personal agent for a phone.")
     ap.add_argument("command", nargs="?", default="chat",
-                    choices=["chat", "install", "backup", "restore", "provider",
+                    choices=["chat", "install", "setup", "backup", "restore", "provider",
                              "status", "skills", "doctor", "version",
                              "start", "stop", "restart", "service", "boot",
                              "portal", "telegram", "config", "_supervise"])
@@ -615,6 +621,9 @@ def main(argv=None) -> int:
         return 0
     if args.command == "install":
         return cmd_install(cfg, args)
+    if args.command == "setup":
+        from . import setup as setup_mod
+        return setup_mod.run(cfg)
     if args.command == "backup":
         return cmd_backup(cfg, args)
     if args.command == "restore":

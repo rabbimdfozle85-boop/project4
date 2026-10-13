@@ -53,10 +53,15 @@ nothing needs installing first.
 `~/.fhone/config.json` (0600), creates and migrates the database, binds the
 `fhone` command, installs the bundled skills, and runs the Nous sign-in.
 
+If no model is configured, install automatically starts the **interactive setup
+wizard** — pick a provider, enter an API key, choose a model, toggle surfaces.
+Cancel anytime and return to the terminal.
+
 Then:
 
 ```sh
 fhone                      # interactive
+fhone setup                # re-run the setup wizard
 fhone -q "what's using my disk?"     # one-shot
 fhone doctor               # health check
 ```
