@@ -167,8 +167,11 @@ def cmd_install(cfg: dict, args) -> int:
     # 4. providers
     pool = providers_mod.ProviderPool(store, cfg)
     pool.seed_defaults()
-    print("  ok   providers seeded (%s)" % ", ".join(
-        p["id"] for p in store.providers()))
+    seeded = [p["id"] for p in store.providers()]
+    if seeded:
+        print("  ok   providers seeded (%s)" % ", ".join(seeded))
+    else:
+        print("  ok   no default providers (add your own below)")
 
     # 5. skills
     bundled = Path(__file__).resolve().parent.parent / "skills"
@@ -684,15 +687,25 @@ def main(argv=None) -> int:
         if args.model:
             cfg["model"] = args.model
         cfg["_yolo"] = bool(getattr(args, "yolo", False))
-        args.session = getattr(args, "session", "cli-default")
-        # Force setup if no provider or model is configured
+        # Use a unique session id per CLI invocation, not a shared default
+        args.session = args.session or new_session_id()
+        # Validate that at least one provider has a healthy key
         from .store import Store
         store = Store(cfg["db"])
         providers = store.providers(enabled_only=False)
+        healthy = False
+        if providers:
+            pool_check = providers_mod.ProviderPool(store, cfg)
+            health = pool_check.health()
+            healthy = health["ok"] > 0
+            pool_check.close()
         store.close()
-        if not providers or not cfg.get("model"):
+        if not providers or not healthy or not cfg.get("model"):
             print()
-            print("  No provider or model configured.")
+            if not providers or not healthy:
+                print("  No healthy provider configured.")
+            if not cfg.get("model"):
+                print("  No model configured.")
             print("  Starting setup wizard...")
             print()
             from . import setup as setup_mod
