@@ -91,6 +91,22 @@ def promotion_status(cfg: dict, claim_code: str) -> dict:
                  {"claim_code": claim_code})
 
 
+def set_api_key(cfg: dict, api_key: str) -> dict:
+    """Directly set a Nous API key. This is the primary auth path.
+
+    The Nous portal blocks non-browser clients (Vercel bot mitigation),
+    so guest mint cannot work from a pure Python client. An API key is
+    the reliable way to authenticate.
+    """
+    auth = config_mod.load_auth()
+    auth["auth_method"] = "api_key"
+    auth["access_token"] = api_key
+    auth["inference_base_url"] = "https://inference-api.nousresearch.com/v1"
+    auth["created_at"] = int(time.time())
+    config_mod.save_auth(auth)
+    return auth
+
+
 def sign_in(cfg: dict, ui=None, *, promote: bool | None = None,
             poll_seconds: int = 300) -> dict:
     """Full first-run flow. Returns the persisted auth dict.
@@ -99,14 +115,25 @@ def sign_in(cfg: dict, ui=None, *, promote: bool | None = None,
     success, and a failed promotion must not block the agent from running.
     """
     auth = config_mod.load_auth()
-    if auth.get("anon_token"):
+    if auth.get("anon_token") or auth.get("access_token"):
         if ui:
-            ui.note("  already signed in to Nous (guest identity present)")
+            if auth.get("auth_method") == "api_key":
+                ui.note("  already signed in to Nous (API key)")
+            else:
+                ui.note("  already signed in to Nous (guest identity present)")
         return auth
 
     if ui:
         ui.note("  minting a Nous guest identity…")
-    minted = mint_guest(cfg)
+    try:
+        minted = mint_guest(cfg)
+    except NousError as e:
+        if ui:
+            ui.note("  ! guest mint failed (%s)" % e)
+            ui.note("    Set a Nous API key instead:")
+            ui.note("      fhone auth nous-key <your-api-key>")
+        return config_mod.load_auth()
+
     auth = {
         "auth_method": "anonymous",
         "client_id": ANON_CLIENT_ID,
@@ -133,8 +160,8 @@ def sign_in(cfg: dict, ui=None, *, promote: bool | None = None,
     if ui:
         ui.note("  guest identity stored in %s" % config_mod.auth_path())
 
-    wants_promotion = cfg.get("nous_auto_promote", True) if promote is None else promote
-    if wants_promotion:
+    wants_promote = cfg.get("nous_auto_promote", True) if promote is None else promote
+    if wants_promote:
         _try_promotion(cfg, auth, ui, poll_seconds)
     return auth
 

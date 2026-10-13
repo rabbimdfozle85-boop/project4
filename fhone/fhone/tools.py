@@ -149,6 +149,21 @@ S_DATETIME = _fn("datetime", "Current date/time operations.",
 S_REGEX = _fn("regex", "Apply regex to text.",
               {"pattern": {"type": "string"}, "text": {"type": "string"},
                "replace": {"type": "string"}}, ["pattern", "text"])
+S_KANBAN_SHOW = _fn("kanban_show", "Show kanban board or a card.",
+                    {"action": {"type": "string"}, "id": {"type": "integer"}}, ["action"])
+S_KANBAN_CREATE = _fn("kanban_create", "Create a kanban card.",
+                       {"title": {"type": "string"}, "description": {"type": "string"},
+                        "status": {"type": "string"}, "priority": {"type": "integer"}},
+                       ["title"])
+S_KANBAN_COMPLETE = _fn("kanban_complete", "Mark a kanban card done.",
+                        {"id": {"type": "integer"}}, ["id"])
+S_KANBAN_BLOCK = _fn("kanban_block", "Block a kanban card.",
+                     {"id": {"type": "integer"}, "reason": {"type": "string"}}, ["id"])
+S_KANBAN_COMMENT = _fn("kanban_comment", "Comment on a kanban card.",
+                       {"id": {"type": "integer"}, "content": {"type": "string"}},
+                       ["id", "content"])
+S_KANBAN_LIST = _fn("kanban_list", "List kanban cards.",
+                    {"status": {"type": "string"}}, [])
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +303,12 @@ class Tools:
             "random": (S_RANDOM, self.random),
             "datetime": (S_DATETIME, self.datetime),
             "regex": (S_REGEX, self.regex),
+            "kanban_show": (S_KANBAN_SHOW, self.kanban_show),
+            "kanban_create": (S_KANBAN_CREATE, self.kanban_create),
+            "kanban_complete": (S_KANBAN_COMPLETE, self.kanban_complete),
+            "kanban_block": (S_KANBAN_BLOCK, self.kanban_block),
+            "kanban_comment": (S_KANBAN_COMMENT, self.kanban_comment),
+            "kanban_list": (S_KANBAN_LIST, self.kanban_list),
         }
 
     # -- registry ----------------------------------------------------------
@@ -866,6 +887,59 @@ class Tools:
             return "error: %s" % e
         except Exception as e:
             return "error: %s" % e
+
+    def kanban_show(self, action: str = "board", id: int = 0) -> str:
+        """Show kanban board or a card."""
+        if action == "card" and id:
+            row = self.store.kanban_get(id)
+            if not row:
+                return "error: card not found"
+            comments = self.store.kanban_comments(id)
+            lines = ["#%d %s [%s] prio=%d" % (row["id"], row["title"], row["status"], row["priority"])]
+            if row.get("description"):
+                lines.append(row["description"])
+            for c in comments:
+                lines.append("  - %s" % c["content"])
+            return "\n".join(lines)
+        rows = self.store.kanban_list()
+        if not rows:
+            return "no cards"
+        lines = []
+        for r in rows:
+            lines.append("#%d %s [%s] prio=%d" % (r["id"], r["title"], r["status"], r["priority"]))
+        return "\n".join(lines)
+
+    def kanban_create(self, title: str, description: str = "",
+                      status: str = "todo", priority: int = 0) -> str:
+        """Create a kanban card."""
+        kid = self.store.kanban_add(title, description, status, priority)
+        return "created card #%d: %s" % (kid, title)
+
+    def kanban_complete(self, id: int) -> str:
+        """Mark a kanban card done."""
+        if self.store.kanban_update(id, status="done"):
+            return "completed card #%d" % id
+        return "error: card not found"
+
+    def kanban_block(self, id: int, reason: str = "") -> str:
+        """Block a kanban card."""
+        if self.store.kanban_update(id, status="blocked"):
+            if reason:
+                self.store.kanban_comment(id, "Blocked: %s" % reason)
+            return "blocked card #%d" % id
+        return "error: card not found"
+
+    def kanban_comment(self, id: int, content: str) -> str:
+        """Comment on a kanban card."""
+        cid = self.store.kanban_comment_add(id, content)
+        return "comment #%d added to card #%d" % (cid, id)
+
+    def kanban_list(self, status: str = "") -> str:
+        """List kanban cards."""
+        rows = self.store.kanban_list(status or "")
+        if not rows:
+            return "no cards"
+        return "\n".join("#%d %s [%s]" % (r["id"], r["title"], r["status"]) for r in rows)
 
     def vision_analyze(self, image: str, question: str) -> str:
         return ("error: no_vision_provider: configure a vision-capable provider "
