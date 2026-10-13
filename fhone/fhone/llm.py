@@ -145,7 +145,7 @@ class Client:
                 return fn()
             except AuthError:
                 raise
-            except (TransientError, OSError, http.client.HTTPException) as e:
+            except (TransientError, OSError, http.client.HTTPException, ValueError) as e:
                 last = e
                 self.close()
             if attempt < self.max_retries - 1:

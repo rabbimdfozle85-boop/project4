@@ -14,7 +14,9 @@ import html.parser
 import json
 import os
 import re
+import select
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -171,6 +173,7 @@ S_KANBAN_LIST = _fn("kanban_list", "List kanban cards.",
 # ---------------------------------------------------------------------------
 
 _BACKGROUND: dict = {}
+_bg_counter = 0
 
 
 def _human_duration(seconds: float) -> str:
@@ -184,7 +187,22 @@ def _human_duration(seconds: float) -> str:
 
 
 def _bg_id() -> str:
-    return "bg%d" % (len(_BACKGROUND) + 1 + int(time.time()) % 1000)
+    global _bg_counter
+    _bg_counter += 1
+    return "bg%d" % _bg_counter
+
+
+def _bg_cleanup() -> None:
+    """Remove exited processes from the registry and close their pipes."""
+    dead = [sid for sid, j in _BACKGROUND.items()
+            if j["proc"].poll() is not None]
+    for sid in dead:
+        job = _BACKGROUND.pop(sid)
+        try:
+            if job["proc"].stdout:
+                job["proc"].stdout.close()
+        except Exception:
+            pass
 
 
 class _HTMLText(html.parser.HTMLParser):
@@ -459,14 +477,25 @@ class Tools:
                                 "started": int(time.time())}
             return "started %s (pid %d)" % (sid, proc.pid)
         try:
-            proc = subprocess.run(command, shell=True, capture_output=True, text=True,
-                                  timeout=secs, cwd=cwd)
+            proc = subprocess.Popen(command, shell=True, cwd=cwd,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, start_new_session=True)
+        except Exception as e:
+            return "error: %s" % e
+        try:
+            out, _ = proc.communicate(timeout=secs)
         except subprocess.TimeoutExpired:
+            # Kill the entire process group so the shell and all children die
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (OSError, AttributeError):
+                proc.kill()
+            proc.communicate()
             return "error: timeout: %ss exceeded" % secs
-        out = (proc.stdout or "") + (proc.stderr or "")
         return ("exit=%d\n%s" % (proc.returncode, out)) if out else "exit=%d" % proc.returncode
 
     def process_manage(self, action: str, session_id: str = "", limit: int = 200) -> str:
+        _bg_cleanup()
         if action == "list":
             if not _BACKGROUND:
                 return "no background processes"
@@ -482,18 +511,17 @@ class Tools:
         if action == "log":
             out = job["proc"].stdout
             if out is not None:
-                # Non-blocking: read() on a live pipe blocks until the child
-                # exits, which hangs the whole turn.
+                # Use select to check readability without blocking or
+                # permanently changing the fd's blocking mode.
                 try:
-                    os.set_blocking(out.fileno(), False)
-                except (OSError, ValueError, AttributeError):
+                    fd = out.fileno()
+                    ready, _, _ = select.select([fd], [], [], 0)
+                    if ready:
+                        chunk = out.read()
+                        if chunk:
+                            job["out"] += chunk
+                except (OSError, ValueError, TypeError):
                     pass
-                try:
-                    chunk = out.read()
-                except (BlockingIOError, TypeError, ValueError):
-                    chunk = None
-                if chunk:
-                    job["out"] += chunk
             return self._cap(job["out"][-int(limit):] or "(no output yet)")
         if action == "kill":
             job["proc"].terminate()
@@ -720,8 +748,12 @@ class Tools:
         """Move a file or directory."""
         import shutil
         try:
-            shutil.move(src, dst)
-            return "moved %s -> %s" % (src, dst)
+            src_p = self._resolve(src)
+            dst_p = self._resolve(dst)
+            shutil.move(str(src_p), str(dst_p))
+            return "moved %s -> %s" % (src_p, dst_p)
+        except PermissionError as e:
+            return "error: outside_sandbox: %s" % e
         except Exception as e:
             return "error: %s" % e
 
@@ -729,11 +761,15 @@ class Tools:
         """Copy a file or directory."""
         import shutil
         try:
-            if os.path.isdir(src):
-                shutil.copytree(src, dst)
+            src_p = self._resolve(src)
+            dst_p = self._resolve(dst)
+            if src_p.is_dir():
+                shutil.copytree(str(src_p), str(dst_p))
             else:
-                shutil.copy2(src, dst)
-            return "copied %s -> %s" % (src, dst)
+                shutil.copy2(str(src_p), str(dst_p))
+            return "copied %s -> %s" % (src_p, dst_p)
+        except PermissionError as e:
+            return "error: outside_sandbox: %s" % e
         except Exception as e:
             return "error: %s" % e
 
@@ -741,11 +777,14 @@ class Tools:
         """Delete a file or directory."""
         import shutil
         try:
-            if os.path.isdir(path):
-                shutil.rmtree(path)
+            p = self._resolve(path)
+            if p.is_dir():
+                shutil.rmtree(str(p))
             else:
-                os.unlink(path)
-            return "deleted %s" % path
+                p.unlink()
+            return "deleted %s" % p
+        except PermissionError as e:
+            return "error: outside_sandbox: %s" % e
         except Exception as e:
             return "error: %s" % e
 

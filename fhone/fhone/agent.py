@@ -31,14 +31,27 @@ class Agent:
             if context.maybe_summarize(st, sid, self.cfg, self.pool):
                 if self.ui:
                     self.ui.note("  (summarized older history)")
-        except Exception:
-            pass
+        except Exception as e:
+            if self.ui:
+                self.ui.note("  ! summarize failed: %s: %s" % (type(e).__name__, e))
 
         st.add(sid, "user", user_text)
 
         extra_system = self._memory_block(sid)
         max_rounds = int(self.cfg.get("max_tool_rounds", 8))
 
+        try:
+            return self._run_turn(sid, user_text, extra_system, max_rounds, on_delta)
+        except KeyboardInterrupt:
+            st.mark_interrupted(sid)
+            raise
+        except Exception as e:
+            st.mark_interrupted(sid)
+            raise
+
+    def _run_turn(self, sid: str, user_text: str, extra_system: list,
+                  max_rounds: int, on_delta) -> str:
+        st = self.store
         for _ in range(max_rounds):
             messages = context.build(st, sid, self.cfg, extra_system)
             result = self.pool.chat(
@@ -60,7 +73,10 @@ class Agent:
                 args = fn.get("arguments") or "{}"
                 if self.ui:
                     self.ui.tool(name, args)
-                output = self.tools.dispatch(name, args)
+                try:
+                    output = self.tools.dispatch(name, args)
+                except Exception as e:
+                    output = "error: %s: %s" % (type(e).__name__, e)
                 if self.ui:
                     self.ui.note("  <- " + (output.splitlines()[0][:120] if output else "(empty)"))
                 st.add(sid, "tool", output, tool_call_id=call.get("id"), name=name)
@@ -99,5 +115,6 @@ class Agent:
                 self.store.note_add(
                     "session %s: %s" % (sid, (answer or "")[:200]),
                     session_id=sid, agent_id=self.agent_id, kind="episode")
-        except Exception:
-            pass
+        except Exception as e:
+            if self.ui:
+                self.ui.note("  ! publish failed: %s: %s" % (type(e).__name__, e))
