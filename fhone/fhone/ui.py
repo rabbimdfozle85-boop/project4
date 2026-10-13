@@ -147,7 +147,7 @@ class UI:
         label = c(sid[:14], CYAN)
         try:
             return input("\n%s %s " % (label, c(">", BOLD)))
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             return "/exit"
 
     # -- status bar --------------------------------------------------------

@@ -580,11 +580,12 @@ def _version() -> str:
 # ---------------------------------------------------------------------------
 
 def main(argv=None) -> int:
+    from . import config as config_mod
     ap = argparse.ArgumentParser(
         prog="fhone", description="FHONE — a personal agent for a phone.")
     ap.add_argument("command", nargs="?", default="chat",
                     choices=["chat", "install", "setup", "backup", "restore", "provider",
-                             "status", "skills", "doctor", "version",
+                             "status", "dashboard", "skills", "doctor", "version",
                              "start", "stop", "restart", "service", "boot",
                              "portal", "telegram", "config", "auth", "_supervise"])
     ap.add_argument("-q", "--query", help="one-shot query, print the answer and exit")
@@ -634,7 +635,7 @@ def main(argv=None) -> int:
         return cmd_restore(cfg, args)
     if args.command == "provider":
         return cmd_provider(cfg, args)
-    if args.command == "status":
+    if args.command in ("status", "dashboard"):
         return cmd_status(cfg, args)
     if args.command == "skills":
         return cmd_skills(cfg, args)

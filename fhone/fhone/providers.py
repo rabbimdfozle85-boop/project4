@@ -191,7 +191,22 @@ class ProviderPool:
 
         if tried == 0:
             raise PoolError("no usable provider or key configured")
-        raise PoolError("all providers failed:\n  " + "\n  ".join(attempts))
+        # Strip raw socket/errno noise — show a readable summary instead.
+        clean = []
+        for a in attempts:
+            # Keep provider/key label, drop the raw error detail after ": "
+            if ": " in a:
+                label, _, detail = a.partition(": ")
+                # Filter out raw connection errors
+                if any(x in detail for x in ("Errno", "Connection reset", "Connection refused",
+                                              "Name or service known", "Temporary failure",
+                                              "Network is unreachable", "timed out")):
+                    clean.append(label + ": connection failed")
+                else:
+                    clean.append(a)
+            else:
+                clean.append(a)
+        raise PoolError("all providers failed:\n  " + "\n  ".join(clean))
 
     def _cooldown(self, krow) -> None:
         fails = int(krow["fail_count"] or 0) + 1

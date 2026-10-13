@@ -92,7 +92,7 @@ def main() -> int:
     section("providers")
     pool = providers.ProviderPool(store, cfg)
     pool.seed_defaults()
-    check("default providers seeded", len(store.providers()) >= 2)
+    check("no default providers pre-loaded (clean start)", len(store.providers()) == 0)
     pool.add_provider("fake", base, label="fake", api_style="openai", priority=1)
     k1 = pool.add_key("fake", "key-one", "one")
     k2 = pool.add_key("fake", "key-two", "two")
