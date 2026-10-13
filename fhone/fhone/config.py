@@ -50,7 +50,7 @@ DEFAULTS: dict = {
     # --- tools --------------------------------------------------------------
     "tool_output_cap": 6000,
     "shell_timeout": 30,
-    "approve_shell": True,
+    "approve_shell": False,
     "sandbox_roots": [],
     # --- surfaces -----------------------------------------------------------
     "portal_enabled": True,

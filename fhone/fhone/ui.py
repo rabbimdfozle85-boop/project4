@@ -145,8 +145,10 @@ class UI:
 
     def prompt(self, sid: str) -> str:
         label = c(sid[:14], CYAN)
+        arrow = c("❯", BOLD, CYAN)
+        line = c("─" * 50, DIM)
         try:
-            return input("\n%s %s " % (label, c(">", BOLD)))
+            return input("\n%s\n%s %s " % (line, label, arrow)).strip()
         except (EOFError, KeyboardInterrupt):
             return "/exit"
 

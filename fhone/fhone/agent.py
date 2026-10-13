@@ -67,19 +67,31 @@ class Agent:
                 self._publish(sid, user_text, content)
                 return content
 
+            # Run tool calls in parallel for lower latency
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            outputs = {}
+            with ThreadPoolExecutor(max_workers=min(len(calls), 4)) as pool:
+                futures = {}
+                for call in calls:
+                    fn = call.get("function") or {}
+                    name = fn.get("name") or ""
+                    args = fn.get("arguments") or "{}"
+                    if self.ui:
+                        self.ui.tool(name, args)
+                    futures[pool.submit(self.tools.dispatch, name, args)] = call
+                for future in as_completed(futures):
+                    call = futures[future]
+                    try:
+                        output = future.result()
+                    except Exception as e:
+                        output = "error: %s: %s" % (type(e).__name__, e)
+                    outputs[call.get("id")] = output
+                    if self.ui:
+                        first_line = output.splitlines()[0][:120] if output else "(empty)"
+                        self.ui.note("  <- " + first_line)
             for call in calls:
-                fn = call.get("function") or {}
-                name = fn.get("name") or ""
-                args = fn.get("arguments") or "{}"
-                if self.ui:
-                    self.ui.tool(name, args)
-                try:
-                    output = self.tools.dispatch(name, args)
-                except Exception as e:
-                    output = "error: %s: %s" % (type(e).__name__, e)
-                if self.ui:
-                    self.ui.note("  <- " + (output.splitlines()[0][:120] if output else "(empty)"))
-                st.add(sid, "tool", output, tool_call_id=call.get("id"), name=name)
+                st.add(sid, "tool", outputs.get(call.get("id"), "error: no output"),
+                       tool_call_id=call.get("id"), name=call.get("function", {}).get("name", ""))
 
         return "(stopped: exceeded max_tool_rounds)"
 
