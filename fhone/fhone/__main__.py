@@ -140,13 +140,19 @@ def cmd_install(cfg: dict, args) -> int:
     # 2. termux:api app
     from shutil import which
     if which("termux-wake-lock"):
-        probe = subprocess.run(["termux-battery-status"], capture_output=True,
-                               text=True, timeout=10)
-        if probe.stdout.strip():
-            print("  ok   Termux:API app reachable (wake-lock, TTS available)")
-        else:
-            print("  warn Termux:API CLI present but the APP is not installed.")
+        try:
+            probe = subprocess.run(["termux-battery-status"], capture_output=True,
+                                   text=True, timeout=5)
+            if probe.stdout.strip():
+                print("  ok   Termux:API app reachable (wake-lock, TTS available)")
+            else:
+                print("  warn Termux:API CLI present but the APP is not installed.")
+                print("       Install 'Termux:API' from F-Droid for wake-lock and TTS.")
+        except subprocess.TimeoutExpired:
+            print("  warn termux-battery-status timed out (Termux:API app not installed).")
             print("       Install 'Termux:API' from F-Droid for wake-lock and TTS.")
+        except FileNotFoundError:
+            print("  warn termux-battery-status not found.")
     else:
         print("  warn termux-api not found (not running under Termux?)")
 
