@@ -114,7 +114,10 @@ class Handler(BaseHTTPRequestHandler):
             ]
 
         if streaming:
-            payload = _sse(frames)
+            # Add a usage frame before [DONE] so streaming usage is testable
+            usage_frame = "data: " + json.dumps(
+                {"usage": {"prompt_tokens": 11, "completion_tokens": 7}}) + "\n\n"
+            payload = ("".join(frames) + usage_frame + "data: [DONE]\n\n").encode("utf-8")
             ctype = "text/event-stream"
         else:
             text = {"test-plain": "plain answer"}.get(

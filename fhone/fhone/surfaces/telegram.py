@@ -209,7 +209,10 @@ class TelegramSurface:
         try:
             answer = agent.turn(sid, text)
         except Exception as e:
-            answer = "error: %s: %s" % (type(e).__name__, e)
+            # Never send raw exceptions (with errno, tracebacks, etc.) to users
+            error_name = type(e).__name__
+            self.log("telegram: agent error: %s: %s" % (error_name, e))
+            answer = "Sorry, something went wrong. Please try again."
         self.api.send_message(chat_id, answer or "(no answer)")
 
     def _session(self, chat_id):
