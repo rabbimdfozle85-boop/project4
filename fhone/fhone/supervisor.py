@@ -241,7 +241,7 @@ class Supervisor:
         def handler(signum, _frame):
             self.log("signal %d received" % signum)
             self.stop_event.set()
-        for sig in (signal.SIGTERM, signal.SIGINT):
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             try:
                 signal.signal(sig, handler)
             except (ValueError, OSError):
@@ -262,6 +262,10 @@ class Supervisor:
             self.telegram.stop()
         if self.portal is not None:
             self.portal.stop()
+        # Join background threads so they finish cleanly before we exit
+        for th in self.threads:
+            if th.is_alive() and th is not threading.current_thread():
+                th.join(timeout=5.0)
         if self.pool is not None:
             self.pool.close()
         if self.store is not None:

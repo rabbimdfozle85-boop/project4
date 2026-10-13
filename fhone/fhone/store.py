@@ -237,6 +237,10 @@ class Store:
             connections, self._connections = self._connections, []
         for con in connections:
             try:
+                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
+            try:
                 con.close()
             except sqlite3.Error:
                 pass
