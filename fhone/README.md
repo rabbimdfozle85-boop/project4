@@ -219,14 +219,15 @@ Usage is recorded per key per day and shown in the status bar.
 
 ---
 
-## Tools (30)
+## Tools (40)
 
 `read_file` `write_file` `patch` `search_files` `list_dir` `terminal`
 `process_manage` `execute_code` `memory` `session_search` `todo_list`
 `skills_list` `skill_view` `skill_manage` `delegate_task` `cronjob_manage`
 `web_search` `web_extract` `http_get` `http_post` `vision_analyze` `image_generate`
 `text_to_speech` `clarify` `sysinfo` `file_move` `file_copy` `file_delete`
-`env_get` `env_set`
+`env_get` `env_set` `git` `curl` `json` `csv` `base64` `hash` `random`
+`datetime` `regex`
 
 Every tool: returns a string, never raises into the turn loop, caps its output,
 validates its arguments, sandboxes its paths, and has a timeout.

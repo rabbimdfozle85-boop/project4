@@ -129,6 +129,26 @@ S_ENVGET = _fn("env_get", "Get an environment variable.",
 S_ENVSET = _fn("env_set", "Set an environment variable for this session.",
                 {"name": {"type": "string"}, "value": {"type": "string"}},
                 ["name", "value"])
+S_GIT = _fn("git", "Git operations: status, diff, log, commit.",
+             {"action": {"type": "string"}, "args": {"type": "string"}}, ["action"])
+S_CURL = _fn("curl", "Make an HTTP request with full control.",
+              {"url": {"type": "string"}, "method": {"type": "string"},
+               "headers": {"type": "object"}, "data": {"type": "string"}}, ["url"])
+S_JSON = _fn("json", "Parse and extract data from JSON.",
+             {"data": {"type": "string"}, "path": {"type": "string"}}, ["data"])
+S_CSV = _fn("csv", "Parse CSV data.",
+             {"data": {"type": "string"}, "delimiter": {"type": "string"}}, ["data"])
+S_BASE64 = _fn("base64", "Encode or decode base64.",
+               {"data": {"type": "string"}, "decode": {"type": "boolean"}}, ["data"])
+S_HASH = _fn("hash", "Compute hash (md5, sha1, sha256).",
+             {"data": {"type": "string"}, "algorithm": {"type": "string"}}, ["data"])
+S_RANDOM = _fn("random", "Generate random values.",
+               {"type": {"type": "string"}, "length": {"type": "integer"}}, [])
+S_DATETIME = _fn("datetime", "Current date/time operations.",
+                 {"action": {"type": "string"}, "timezone": {"type": "string"}}, [])
+S_REGEX = _fn("regex", "Apply regex to text.",
+              {"pattern": {"type": "string"}, "text": {"type": "string"},
+               "replace": {"type": "string"}}, ["pattern", "text"])
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +279,15 @@ class Tools:
             "file_delete": (S_FDELETE, self.file_delete),
             "env_get": (S_ENVGET, self.env_get),
             "env_set": (S_ENVSET, self.env_set),
+            "git": (S_GIT, self.git),
+            "curl": (S_CURL, self.curl),
+            "json": (S_JSON, self.json),
+            "csv": (S_CSV, self.csv),
+            "base64": (S_BASE64, self.base64),
+            "hash": (S_HASH, self.hash),
+            "random": (S_RANDOM, self.random),
+            "datetime": (S_DATETIME, self.datetime),
+            "regex": (S_REGEX, self.regex),
         }
 
     # -- registry ----------------------------------------------------------
@@ -708,6 +737,135 @@ class Tools:
         """Set an environment variable for this session."""
         os.environ[name] = value
         return "set %s = %s" % (name, value)
+
+    def git(self, action: str = "status", args: str = "") -> str:
+        """Git operations: status, diff, log, commit."""
+        cmd = ["git", action] + ([args] if args else [])
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                return result.stdout[:5000]
+            if result.stderr.strip():
+                return "error: %s" % result.stderr[:500]
+            return "ok"
+        except FileNotFoundError:
+            return "error: git not found"
+        except subprocess.TimeoutExpired:
+            return "error: timeout"
+        except Exception as e:
+            return "error: %s" % e
+
+    def curl(self, url: str, method: str = "GET", headers: dict | None = None,
+             data: str | None = None) -> str:
+        """Make an HTTP request with full control."""
+        hdrs = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+        if headers:
+            hdrs.update(headers)
+        body = None
+        if data:
+            body = data.encode() if isinstance(data, str) else data
+        req = urllib.request.Request(url, data=body, headers=hdrs,
+                                     method=method.upper())
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8", "replace")[:10000]
+        except urllib.error.HTTPError as e:
+            return "HTTP %d: %s" % (e.code, e.read().decode("utf-8", "replace")[:2000])
+        except Exception as e:
+            return "error: %s: %s" % (type(e).__name__, e)
+
+    def json(self, data: str, path: str = "") -> str:
+        """Parse and extract data from JSON."""
+        try:
+            obj = json.loads(data)
+        except ValueError as e:
+            return "error: invalid JSON: %s" % e
+        if not path:
+            return json.dumps(obj, indent=2)[:5000]
+        try:
+            for key in path.split("."):
+                if isinstance(obj, list):
+                    obj = obj[int(key)]
+                else:
+                    obj = obj[key]
+            return json.dumps(obj, indent=2)[:5000]
+        except (KeyError, IndexError, ValueError) as e:
+            return "error: path '%s' not found: %s" % (path, e)
+
+    def csv(self, data: str, delimiter: str = ",") -> str:
+        """Parse CSV data."""
+        import io
+        import csv as _csv
+        try:
+            reader = _csv.reader(io.StringIO(data), delimiter=delimiter)
+            rows = list(reader)
+            if not rows:
+                return "empty"
+            return "\n".join(", ".join(str(c) for c in row) for row in rows)
+        except Exception as e:
+            return "error: %s" % e
+
+    def base64(self, data: str, decode: bool = False) -> str:
+        """Encode or decode base64."""
+        import base64 as _b64
+        try:
+            if decode:
+                return _b64.b64decode(data).decode("utf-8", "replace")
+            return _b64.b64encode(data.encode()).decode()
+        except Exception as e:
+            return "error: %s" % e
+
+    def hash(self, data: str, algorithm: str = "sha256") -> str:
+        """Compute hash (md5, sha1, sha256)."""
+        import hashlib
+        try:
+            h = hashlib.new(algorithm)
+            h.update(data.encode())
+            return h.hexdigest()
+        except ValueError:
+            return "error: unknown algorithm: %s" % algorithm
+        except Exception as e:
+            return "error: %s" % e
+
+    def random(self, type: str = "string", length: int = 16) -> str:
+        """Generate random values."""
+        import secrets
+        import string
+        if type == "hex":
+            return secrets.token_hex(length)
+        if type == "url":
+            return secrets.token_urlsafe(length)
+        if type == "int":
+            return str(secrets.randbelow(10 ** length))
+        chars = string.ascii_letters + string.digits
+        return "".join(secrets.choice(chars) for _ in range(length))
+
+    def datetime(self, action: str = "now", timezone: str = "") -> str:
+        """Current date/time operations."""
+        import time
+        if action == "now":
+            if timezone:
+                os.environ["TZ"] = timezone
+                time.tzset()
+            return time.strftime("%Y-%m-%d %H:%M:%S %Z")
+        if action == "epoch":
+            return str(int(time.time()))
+        if action == "format":
+            return time.strftime("%Y-%m-%d %H:%M:%S")
+        return "error: unknown action: %s" % action
+
+    def regex(self, pattern: str, text: str, replace: str = "") -> str:
+        """Apply regex to text."""
+        import re
+        try:
+            if replace:
+                return re.sub(pattern, replace, text)
+            matches = re.findall(pattern, text)
+            return "\n".join(matches) if matches else "no matches"
+        except re.error as e:
+            return "error: %s" % e
+        except Exception as e:
+            return "error: %s" % e
 
     def vision_analyze(self, image: str, question: str) -> str:
         return ("error: no_vision_provider: configure a vision-capable provider "

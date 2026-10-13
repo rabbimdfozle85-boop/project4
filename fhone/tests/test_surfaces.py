@@ -113,7 +113,7 @@ def main() -> int:
     payload = json.loads(body)
     check("status reports the product", payload.get("product") == "fhone")
     check("status reports a version", bool(payload.get("version")))
-    check("status lists 30 tools", len(payload.get("tools") or []) == 30,
+    check("status lists 40 tools", len(payload.get("tools") or []) == 40,
           len(payload.get("tools") or []))
     check("status reports the fake provider",
           any(p["id"] == "fake" for p in payload.get("providers") or []))

@@ -642,19 +642,24 @@ def _keys_cmd(arg: str, state: dict) -> None:
 
 
 def _status_cmd(state: dict) -> None:
+    from . import banner
     store, pool, ui, cfg = state["store"], state["pool"], state["ui"], state["cfg"]
     health = pool.health()
-    ui.note(c("FHONE status", BOLD))
-    ui.note("  session   %s" % state["session"])
-    ui.note("  model     %s" % (cfg.get("model") or "(unset)"))
-    ui.note("  providers:")
-    for p in health["providers"]:
-        ui.note("    %-14s %-24s %s" % (p["id"], p["state"], p["label"]))
-    ui.note("  keys      %d total, %d ok, %d cooling, %d dead" % (
-        health["total"], health["ok"], health["cooldown"], health["dead"]))
     total = store.usage_total()
-    ui.note("  usage     requests=%s prompt=%s completion=%s" % (
-        total["r"] or 0, total["p"] or 0, total["c"] or 0))
-    ui.note("  messages  %d in this session" % store.count(state["session"]))
-    ui.note("  memories  %d" % store.memory_count())
-    ui.note("  home      %s" % cfg["home"])
+    body = "\n".join([
+        "  session   %s" % state["session"],
+        "  model     %s" % (cfg.get("model") or "(unset)"),
+        "  providers:",
+    ] + [
+        "    %-14s %-24s %s" % (p["id"], p["state"], p["label"])
+        for p in health["providers"]
+    ] + [
+        "  keys      %d total, %d ok, %d cooling, %d dead" % (
+            health["total"], health["ok"], health["cooldown"], health["dead"]),
+        "  usage     requests=%s prompt=%s completion=%s" % (
+            total["r"] or 0, total["p"] or 0, total["c"] or 0),
+        "  messages  %d in this session" % store.count(state["session"]),
+        "  memories  %d" % store.memory_count(),
+        "  home      %s" % cfg["home"],
+    ])
+    ui.note(banner.panel("FHONE status", body))

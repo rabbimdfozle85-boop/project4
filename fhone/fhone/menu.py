@@ -76,10 +76,8 @@ def error(text: str) -> str:
 
 def render(title: str, body: list[str]) -> str:
     """Render a complete menu screen."""
-    parts = [h1(title), sep()]
-    parts.extend(body)
-    parts.append(sep())
-    return "\n".join(parts)
+    from . import banner
+    return banner.panel(title, "\n".join(body))
 
 
 def prompt(label: str, default: str = "") -> str:

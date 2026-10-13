@@ -72,8 +72,28 @@ DEFAULTS: dict = {
     # --- nous ---------------------------------------------------------------
     "nous_portal_url": "https://portal.nousresearch.com",
     "nous_auto_promote": True,
-    # --- misc ---------------------------------------------------------------
+    # --- display ------------------------------------------------------------
     "status_bar": True,
+    "timestamps": False,
+    "verbose": False,
+    "focus": False,
+    "reasoning": "",
+    "fast": False,
+    "approvals": "ask",
+    # --- display ------------------------------------------------------------
+    "display_skin": "default",
+    "display_tool_emojis": True,
+    "display_compact": False,
+    "status_bar": True,
+    "timestamps": False,
+    "verbose": False,
+    "focus": False,
+    "reasoning": "",
+    "fast": False,
+    "approvals": "ask",
+    # --- security -----------------------------------------------------------
+    "security_dangerous_approval": True,
+    # --- misc ---------------------------------------------------------------
     "system_prompt": (
         "You are FHONE, a terse personal agent running on a phone. "
         "Use tools when they genuinely help. Keep answers short. "
@@ -101,17 +121,37 @@ def load() -> dict:
     if not cfg.get("backup_dir"):
         cfg["backup_dir"] = str(h / "backups")
 
-    # environment overrides
+    # environment overrides (Hermes-style env mirroring)
     env_map = {
         "FHONE_API_KEY": "api_key",
         "FHONE_MODEL": "model",
         "FHONE_PORTAL_TOKEN": "portal_token",
         "TELEGRAM_BOT_TOKEN": "telegram_token",
+        "OPENROUTER_API_KEY": "openrouter_api_key",
+        "GEMINI_API_KEY": "gemini_api_key",
+        "GROQ_API_KEY": "groq_api_key",
+        "NOUS_API_KEY": "nous_api_key",
+        "POLLINATIONS_API_KEY": "pollinations_api_key",
+        "FHONE_STATUS_BAR": "status_bar",
+        "FHONE_TIMESTAMPS": "timestamps",
+        "FHONE_VERBOSE": "verbose",
+        "FHONE_FOCUS": "focus",
+        "FHONE_REASONING": "reasoning",
+        "FHONE_FAST": "fast",
+        "FHONE_APPROVALS": "approvals",
+        "FHONE_DISPLAY_SKIN": "display_skin",
+        "FHONE_DISPLAY_TOOL_EMOJIS": "display_tool_emojis",
+        "FHONE_DISPLAY_COMPACT": "display_compact",
+        "FHONE_SECURITY_DANGEROUS_APPROVAL": "security_dangerous_approval",
     }
     for env_key, cfg_key in env_map.items():
         val = os.environ.get(env_key)
         if val:
-            cfg[cfg_key] = val
+            # Auto-convert bool strings
+            if val.lower() in ("true", "false"):
+                cfg[cfg_key] = val.lower() == "true"
+            else:
+                cfg[cfg_key] = val
     if not cfg.get("api_key"):
         cfg["api_key"] = os.environ.get("OPENAI_API_KEY", "")
 
